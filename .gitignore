@@ -2,20 +2,12 @@
 /*
 !src/
 
-# ignore everything in the public except the "content" directory.
-public/*
-!public/content/
-
 # ignore everything in the "content" directory, except:
 # mu-plugins, plugins, and themes directories
-public/content/*
-!public/content/mu-plugins/
-!public/content/plugins/
-!public/content/themes/
-
-public/content/mu-plugins/*
-public/content/plugins/*
-public/content/themes/*
+!public/
+public/wp/
+public/content/plugins/ntdst_platform/
+public/content/plugins/ntdst_services/
 
 # ignore all files starting with . or ~
 .*
@@ -60,13 +52,14 @@ Thumbs.db
 *.zip
 
 # ignore environment files
-.env
+# .env
 
 # -------------------------
 # BEGIN Whitelisted Files
 # -------------------------
 
 # track these files, if they exist
+!.htaccess
 !.gitignore
 !.gitmodules
 !.editorconfig

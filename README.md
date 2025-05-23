@@ -11,4 +11,4 @@ stackedWP is a WordPress boilerplate for projects managed with Git and Composer 
 
 ## Getting Started
 
-Install with composer, update npm and look into the Makefile
+Configure .env.local, composer install and look into the Makefile on how to continue

@@ -1,9 +1,9 @@
 {
-  "name": "ntdst/stackedWP",
+  "name": "ntdst/stackedwp",
   "type": "project",
   "license": "MIT",
   "description": "WordPress boilerplate with Composer, Make and more candy",
-  "homepage": "https://netdust.be/webstack/",
+  "homepage": "https://netdust.be/stackedwp/",
   "authors": [
     {
       "name": "Stefan Vandermeulen",
@@ -12,7 +12,13 @@
     }
   ],
   "keywords": [
-    "webstack", "composer", "make", "vite.js", "wordpress", "wp", "config"
+    "stackedWP",
+    "composer",
+    "make",
+    "vite.js",
+    "wordpress",
+    "wp",
+    "config"
   ],
   "require": {
     "php": ">=8.1",
@@ -22,19 +28,19 @@
   "config": {
     "optimize-autoloader": true,
     "preferred-install": "dist",
+    "vendor-dir": "app/vendor/",
     "allow-plugins": {
       "composer/installers": true
-    },
-    "vendor-dir": "app/vendor/"
+    }
   },
   "minimum-stability": "dev",
   "prefer-stable": true,
   "extra": {
+    "wordpress-install-dir": "app/wp",
     "installer-paths": {
       "app/content/mu-plugins/{$name}/": ["type:wordpress-muplugin"],
       "app/content/plugins/{$name}/": ["type:wordpress-plugin"],
       "app/content/themes/{$name}/": ["type:wordpress-theme"]
-    },
-    "wordpress-install-dir": "app/wp"
+    }
   }
 }

@@ -1,3 +1,3 @@
-path: app/public/wp
+path: app/wp
 server:
-  docroot: app/public
+  docroot: app

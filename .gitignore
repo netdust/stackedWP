@@ -4,8 +4,8 @@
 
 # ignore everything in the "content" directory, except:
 # mu-plugins, plugins, and themes directories
-!public/
-public/wp/
+!app/
+app/wp/
 
 # ignore all files starting with . or ~
 .*
@@ -49,9 +49,6 @@ Thumbs.db
 *.tar
 *.zip
 
-
-
-
 # -------------------------
 # BEGIN Whitelisted Files
 # -------------------------
@@ -67,6 +64,8 @@ Thumbs.db
 !composer.json
 !package.json
 !vite.config.js
+!wp-cli.yml
+!Makefile
 
 # track favicon files, if they exist
 !android-chrome-*.png
@@ -80,7 +79,7 @@ Thumbs.db
 !site.webmanifest
 
 # add this one, because we need it for vite
-!.env
+!.env*
 
 # track these mu-plugins, plugins, and themes
 # add your own entries here

@@ -1,6 +1,6 @@
 # stackedWP
 
-stackedwp is a WordPress boilerplate for projects managed with Git and Composer and Make. Much of the philosophy is inspired by Bedrock and best practice principles.
+stackedWP is a WordPress boilerplate for projects managed with Git and Composer and Make. Much of the philosophy is inspired by Bedrock and best practice principles.
 
 - Clean folder structure with security in mind
 - Dependency management with composer

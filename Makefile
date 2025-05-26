@@ -1,19 +1,31 @@
-.PHONY: dev, stop, drop, install, open-db
+.PHONY: init, config, get-wp, install-wp, dev, stop, drop, open-db, config-wp
 
-WP_VERSION ?= latest
-WP_USER ?= admin
-WP_PASSWORD ?= admin
-WP_EMAIL ?= admin@example.com
-WP_TITLE ?= My Site
-WP_URL ?= http://stackedwp.ddev.site
+ifeq ($(wildcard .env.local),.env.local)
+    include .env.local
+    export $(shell sed 's/^#.*//g' .env.local | sed '/^$$/d' | cut -d'=' -f1)
+    WP_BLOGNAME := $(strip $(subst ",,$(WP_BLOGNAME)))
+    WP_BLOGDESCRIPTION := $(strip $(subst ",,$(WP_BLOGDESCRIPTION)))
+    GITHUB_PLUGINS_REPOS := $(strip $(subst ",,$(GITHUB_PLUGINS_REPOS)))
+endif
 
-dev:
-	ddev start
+init:
+	ddev config
+	ddev config --webserver-type apache-fpm
+	ddev restart
 
-stop:
-	ddev stop
+config:
+	$(call message_primary, "SETUP ENVIRONMENT")
+	@if [ ! -f .env ]; then \
+		if [ -f .env.example ]; then \
+			cp .env.example app/.env; \
+			echo ".env file created from .env.example"; \
+		else \
+			echo "Error: .env.example file not found"; \
+			exit 1; \
+		fi; \
+	fi; \
 
-wp:
+get-wp:
 	ddev start
 	$(call message_primary, "DOWNLOAD WP $(WP_VERSION)")
 	ddev exec wp core download --force --version=$(WP_VERSION)
@@ -25,79 +37,68 @@ wp:
 		ddev exec rm -f app/wp/readme.html app/wp/license.txt
 		ddev exec rm -rf app/wp/wp-content
 
-setup:
-	ddev start
-	$(call message_primary, "SETUP ENVIRONMENT")
-	@if [ ! -f .env ]; then \
-		if [ -f .env.example ]; then \
-			cp .env.example app/.env; \
-			echo ".env file created from .env.example.dev"; \
-		else \
-			echo "Error: .env.example.dev file not found"; \
-			exit 1; \
-		fi; \
-	fi; \
-
-	$(call message_primary, "CREATE DB")
-	@ddev exec wp db check >/dev/null 2>&1 || ddev exec wp db create
-
-	$(call message_primary, "INSTALL WP")
+install-wp:
+	@echo "Running install-wp..."
+	ddev exec wp db check >/dev/null 2>&1 || ddev exec wp db create
+	@echo "INSTALL WP"
 	ddev exec wp core install \
-		--url=$(WP_URL) \
-		--title="$(WP_TITLE)" \
-		--admin_user=$(WP_USER) \
-		--admin_password=$(WP_PASSWORD) \
-		--admin_email=$(WP_EMAIL) \
+		--url='$(WP_HOME)' \
+		--title='$(WP_TITLE)' \
+		--admin_user='$(WP_USER)' \
+		--admin_password='$(WP_PASSWORD)' \
+		--admin_email='$(WP_EMAIL)' \
 		--skip-plugins=hello \
 		--skip-themes=twentyfifteen,twentysixteen,twentyseventeen,twentynineteen,twentytwenty
 
-	#@if git submodule status | egrep -q '^[-+]' ; then \
-	#	echo "INFO: Need to reinitialize git submodules"; \
-	#	git submodule update --init; \
-    #fi \
+	@echo "WordPress installed!"
 
-	#$(call message_primary, "INSTALL PLUGINS")
-	#wp plugin install jetpack --activate
-	#wp plugin install contact-form-7 --activate
-	#wp plugin install wordpress-seo --activate
-	#wp plugin install updraftplus --activate
-	#wp plugin install backwpup
-
-	$(call message_primary, "INSTALL THEME")
-	ddev exec wp theme install twentytwenty --activate
-
-	#$(call message_primary, "PAGES CREATE - home / blog / contact / privacy")
-	#ddev exec wp post create --post_type=page --post_title='Home' --post_status=publish
-	#ddev exec wp post create --post_type=page --post_title='Blog' --post_status=publish
-	#ddev exec wp post create --post_type=page --post_title='Contact' --post_status=publish
-	#ddev exec wp post create --post_type=page --post_title='Privacy' --post_status=publish
-
-	#$(call message_primary, "CONFIG SET PAGE - select home page / article")
-	#ddev exec wp option update show_on_front page
-	#ddev exec wp option update page_on_front 4
-	#ddev exec wp option update page_for_posts 5
-
-	#$(call message_primary, "CONFIG MENU")
-	#ddev exec wp menu create "Main Menu"
-	#ddev exec wp menu item add-post main-menu 3
-	#ddev exec wp menu item add-post main-menu 4
-	#ddev exec wp menu item add-post main-menu 5
-	#ddev exec wp menu item add-post main-menu 6
-
-	$(call message_primary, "DELETE : plugin - theme - articles examples")
-	ddev exec wp option update blogdescription 'my website'
-	#ddev exec wp post delete 1 --force
-	#ddev exec wp post delete 2 --force
+config-wp:
+	@echo "Configuring WordPress General Settings..."
+	ddev exec wp option update blogname '$(WP_BLOGNAME)'
+	ddev exec wp option update blogdescription '$(WP_BLOGDESCRIPTION)'
+	ddev exec wp option update WPLANG '$(WP_WPLANG)'
+	ddev exec wp option update timezone_string '$(WP_TIMEZONE)'
 
 	$(call message_primary, "PERMALINKS")
 	ddev exec wp option get permalink_structure
 	ddev exec wp option update permalink_structure '/%postname%'
 	ddev exec wp rewrite flush --hard
 
-	#ifeq ($(os_custom), mac)
-	#	$(call message_primary, "GIT - init")
-	#	@ddev exec bash -c "if [ ! -d .git ]; then git init && git add -A && git commit -m 'Initial commit'; fi"
-	#endif
+	@echo "WordPress Settings Applied!"
+
+theme-setup:
+	$(call message_primary, "INSTALL PLUGINS")
+	ddev exec wp plugin install fluent-smtp --activate
+	ddev exec wp plugin install advanced-custom-fields --activate
+	ddev exec wp plugin install woocommerce --activate
+
+	ddev exec wp theme install yootheme_wp_4.5.17.zip --activate
+
+install-github-plugins:
+	@echo "--- Initializing GitHub Plugin Installation ---"
+	@echo "1. Ensuring DDEV SSH Agent is Authenticated..."
+	ddev auth ssh || { echo "ERROR: ddev auth ssh failed. Ensure your SSH agent is running and keys are added (e.g., 'eval \"\$$\(ssh-agent -s\)\"; ssh-add ~/.ssh/id_ed25519')"; exit 1; }
+
+	@echo "2. Preparing target plugin directory: $(WP_PLUGINS_DEST_DIR)..."
+	ddev exec sudo chown -R www-data:www-data $(WP_PLUGINS_DEST_DIR) || { echo "ERROR: Failed to change ownership"; exit 1; }
+	ddev exec sudo chmod -R ug+rwX,o+rX $(WP_PLUGINS_DEST_DIR) || { echo "ERROR: Failed to set permissions"; exit 1; }
+
+	@echo "3. Cloning and Activating GitHub Plugins..."
+	@for repo_url in $(GITHUB_PLUGINS_REPOS); do \
+		repo_name=$$(basename $$repo_url .git); \
+		echo "  -> Processing $$repo_name from $$repo_url..."; \
+		ddev exec bash -c "git clone '$$repo_url' '$(WP_PLUGINS_DEST_DIR)/$$repo_name' || ( cd '$(WP_PLUGINS_DEST_DIR)/$$repo_name' && git pull )"; \
+		ddev exec wp plugin activate "$$repo_name/$$repo_name.php" || \
+		echo "WARNING: Could not activate $$repo_name. Maybe it's already active or the main file name is wrong."; \
+	done
+
+	@echo "--- GitHub Plugins Installation Complete ---"
+
+dev:
+	ddev start
+
+stop:
+	ddev stop
 
 drop:
 	ddev exec mysql -e "DROP DATABASE IF EXISTS db; CREATE DATABASE db;"

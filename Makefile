@@ -74,13 +74,7 @@ config-wp:
 
 
 install-themes:
-	ddev exec wp theme install $(WP_THEMES) --activate
 	@echo "--- Initializing Theme Installation ---"
-	@echo "1. Preparing target theme directory: $(WP_THEMES_DEST_DIR)..."
-	ddev exec sudo chown -R www-data:www-data $(WP_THEMES_DEST_DIR) || { echo "ERROR: Failed to change ownership"; exit 1; }
-	ddev exec sudo chmod -R ug+rwX,o+rX $(WP_THEMES_DEST_DIR) || { echo "ERROR: Failed to set permissions"; exit 1; }
-
-	@echo "2. Installing WordPress themes..."
 	@for theme in $(WP_THEMES); do \
  		echo "  - Installing $$theme..."; \
  		ddev exec wp theme install $$theme --activate; \

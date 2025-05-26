@@ -58,32 +58,60 @@ install-wp:
 
 config-wp:
 	@echo "Configuring WordPress General Settings..."
+	
+
 	ddev exec wp option update blogname '$(WP_BLOGNAME)'
 	ddev exec wp option update blogdescription '$(WP_BLOGDESCRIPTION)'
 	ddev exec wp option update WPLANG '$(WP_WPLANG)'
 	ddev exec wp option update timezone_string '$(WP_TIMEZONE)'
+	ddev exec wp option update date_format 'd/m/Y'
+	ddev exec wp option update time_format 'H:i'
+
+	ddev exec wp post create --post_type=page --post_title="Home" --post_status=publish --allow-root
+	ddev exec wp option update show_on_front 'page' --allow-root
+	ddev exec wp option update page_on_front 5 --allow-root
+
+	ddev exec wp option update default_comment_status 'closed' --allow-root
 
 	$(call message_primary, "PERMALINKS")
 	ddev exec wp option get permalink_structure
 	ddev exec wp option update permalink_structure '/%postname%'
 	ddev exec wp rewrite flush --hard
 
+	ddev exec wp widget reset --all --allow-root
+
 	@echo "WordPress Settings Applied!"
 
 
-
-
 install-themes:
+	ddev exec wp theme install $(WP_THEMES) --activate
 	@echo "--- Initializing Theme Installation ---"
+	@echo "1. Preparing target theme directory: $(WP_THEMES_DEST_DIR)..."
+	ddev exec sudo chown -R www-data:www-data $(WP_THEMES_DEST_DIR) || { echo "ERROR: Failed to change ownership"; exit 1; }
+	ddev exec sudo chmod -R ug+rwX,o+rX $(WP_THEMES_DEST_DIR) || { echo "ERROR: Failed to set permissions"; exit 1; }
+
+	@echo "2. Installing WordPress themes..."
 	@for theme in $(WP_THEMES); do \
  		echo "  - Installing $$theme..."; \
- 		ddev exec wp theme install $$theme --activate; \
+ 		ddev exec wp theme install $$theme --activate --allow-root; \
  		if [ $$? -ne 0 ]; then \
  			echo "    Error: Failed to install and activate $$theme."; \
  			exit 1; \
  		fi; \
  	done
 	@echo "All specified WordPress themes installed and activated successfully!"
+
+install-themes-zip: 
+	@echo "--- Initializing Custom Theme (ZIP) Installation ---"
+	@for theme_zip in $(WP_THEMES_ZIP); do \
+		echo "  - Installing $$theme_zip..."; \
+		ddev wp theme install $$theme_zip --activate --allow-root; \
+		if [ $$? -ne 0 ]; then \
+			echo "    Error: Failed to install and activate $$theme_zip."; \
+			exit 1; \
+		fi; \
+	done
+	@echo "All specified custom WordPress themes installed and activated successfully!"
 
 install-plugins:
 	@echo "--- Initializing Plugin Installation ---"

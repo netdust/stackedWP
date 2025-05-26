@@ -8,11 +8,14 @@ ifeq ($(wildcard .env.local),.env.local)
     GITHUB_PLUGINS_REPOS := $(strip $(subst ",,$(GITHUB_PLUGINS_REPOS)))
 endif
 
-init:
+
+
+init: 
 	ddev config
 	ddev config --webserver-type apache-fpm
 	ddev restart
 	ddev exec composer install
+
 
 config:
 	$(call message_primary, "SETUP ENVIRONMENT")
@@ -68,6 +71,8 @@ config-wp:
 	@echo "WordPress Settings Applied!"
 
 
+
+
 install-themes:
 	ddev exec wp theme install $(WP_THEMES) --activate
 	@echo "--- Initializing Theme Installation ---"
@@ -88,12 +93,6 @@ install-themes:
 
 install-plugins:
 	@echo "--- Initializing Plugin Installation ---"
-
-	@echo "1. Preparing target plugin directory: $(WP_PLUGINS_DEST_DIR)..."
-	ddev exec sudo chown -R www-data:www-data $(WP_PLUGINS_DEST_DIR) || { echo "ERROR: Failed to change ownership"; exit 1; }
-	ddev exec sudo chmod -R ug+rwX,o+rX $(WP_PLUGINS_DEST_DIR) || { echo "ERROR: Failed to set permissions"; exit 1; }
-
-	@echo "2. Installing WordPress core plugins..."
 	@for plugin in $(WP_PLUGINS); do \
  		echo "  - Installing $$plugin..."; \
  		ddev wp plugin install $$plugin --activate --skip-plugins --allow-root; \
@@ -124,14 +123,6 @@ install-github-plugins:
 
 	@echo "--- GitHub Plugins Installation Complete ---"
 
-dev:
-	ddev start
-
-stop:
-	ddev stop
-
-drop:
-	ddev exec mysql -e "DROP DATABASE IF EXISTS db; CREATE DATABASE db;"
 
 update-wp:
 	ddev exec wp core update
@@ -150,3 +141,22 @@ update-all: update-git update-wp
 open-db:
 	@echo "Opening the database for direct access"
 	open mysql://wordpress:wordpress@127.0.0.1:$$(lando info --service=database --path 0.external_connection.port | tr -d "'")/wordpress?enviroment=local&name=$database&safeModeLevel=0&advancedSafeModeLevel=0
+
+drop:
+	ddev exec mysql -e "DROP DATABASE IF EXISTS db; CREATE DATABASE db;"
+
+# Target to fix host permissions for the plugins directory
+fix-host-permissions:
+	@echo "--- Fixing host permissions for plugins directory: $(HOST_PATH)$(WP_PLUGINS_DEST_DIR) ---"
+	@mkdir -p $(HOST_PATH)$(WP_PLUGINS_DEST_DIR)
+	@sudo chmod -R u+rwX,g+rwX,o+rX $(HOST_PATH)$(WP_PLUGINS_DEST_DIR) || { echo "ERROR: Failed to set permissions on host."; exit 1; }
+	@sudo chown -R $(shell id -un):$(shell id -gn) $(HOST_PATH)$(WP_PLUGINS_DEST_DIR) || { echo "ERROR: Failed to change ownership on host."; exit 1; }
+	@echo "Host permissions for plugins fixed."
+
+	@echo "--- Fixing host permissions for themes directory: $(HOST_PATH)$(WP_THEMES_DEST_DIR) ---"
+	@mkdir -p $(HOST_PATH)$(WP_THEMES_DEST_DIR)
+	@sudo chmod -R u+rwX,g+rwX,o+rX $(HOST_PATH)$(WP_THEMES_DEST_DIR) || { echo "ERROR: Failed to set permissions on host."; exit 1; }
+	@sudo chown -R $(shell id -un):$(shell id -gn) $(HOST_PATH)$(WP_THEMES_DEST_DIR) || { echo "ERROR: Failed to change ownership on host."; exit 1; }
+	@echo "Host permissions for themes fixed."
+
+	

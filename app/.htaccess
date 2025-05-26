@@ -1,5 +1,14 @@
 Options -Indexes
 
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteBase /
+
+# Custom rule to redirect wp-content to content
+RewriteRule ^wp-content/(.*)$ /content/$1 [L,R=301]
+</IfModule>
+
+
 # HTTP Strict Transport Security (HSTS)
 Header set Strict-Transport-Security "max-age=31536000" env=HTTPS
 # X-Content-Type-Options
@@ -14,6 +23,7 @@ Header set X-XSS-Protection "1; mode=block"
 <files wp-config.php>
 Require all denied
 </files>
+
 
 # Disable access to xmlrpc.php
 <Files xmlrpc.php>
@@ -42,9 +52,9 @@ RewriteRule ^ - [F]
 
 
 <IfModule mod_rewrite.c>
-RewriteEngine On
-RewriteCond %{HTTPS} off
-RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+# RewriteEngine On
+# RewriteCond %{HTTPS} off
+# RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 </IfModule>
 
 # BEGIN WordPress

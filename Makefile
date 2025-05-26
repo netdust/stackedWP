@@ -67,16 +67,24 @@ config-wp:
 
 	@echo "WordPress Settings Applied!"
 
-theme-setup:
-	$(call message_primary, "INSTALL PLUGINS")
-	ddev exec wp plugin install fluent-smtp --activate
-	ddev exec wp plugin install advanced-custom-fields --activate
-	#ddev exec wp plugin install woocommerce --activate
 
-	ddev exec wp theme install yootheme_wp_4.5.17.zip --activate
+install-themes:
+	ddev exec wp theme install $(WP_THEMES) --activate
+	@echo "--- Initializing Theme Installation ---"
+	@echo "1. Preparing target theme directory: $(WP_THEMES_DEST_DIR)..."
+	ddev exec sudo chown -R www-data:www-data $(WP_THEMES_DEST_DIR) || { echo "ERROR: Failed to change ownership"; exit 1; }
+	ddev exec sudo chmod -R ug+rwX,o+rX $(WP_THEMES_DEST_DIR) || { echo "ERROR: Failed to set permissions"; exit 1; }
 
-install-theme:
-	ddev exec wp theme install $(WP_THEME) --activate
+	@echo "2. Installing WordPress themes..."
+	@for theme in $(WP_THEMES); do \
+ 		echo "  - Installing $$theme..."; \
+ 		ddev exec wp theme install $$theme --activate; \
+ 		if [ $$? -ne 0 ]; then \
+ 			echo "    Error: Failed to install and activate $$theme."; \
+ 			exit 1; \
+ 		fi; \
+ 	done
+	@echo "All specified WordPress themes installed and activated successfully!"
 
 install-plugins:
 	@echo "--- Initializing Plugin Installation ---"
@@ -86,7 +94,7 @@ install-plugins:
 	ddev exec sudo chmod -R ug+rwX,o+rX $(WP_PLUGINS_DEST_DIR) || { echo "ERROR: Failed to set permissions"; exit 1; }
 
 	@echo "2. Installing WordPress core plugins..."
-	@for plugin in $(WP_CORE_PLUGINS); do \
+	@for plugin in $(WP_PLUGINS); do \
  		echo "  - Installing $$plugin..."; \
  		ddev wp plugin install $$plugin --activate --skip-plugins --allow-root; \
  		if [ $$? -ne 0 ]; then \

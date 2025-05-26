@@ -12,6 +12,7 @@ init:
 	ddev config
 	ddev config --webserver-type apache-fpm
 	ddev restart
+	ddev exec composer install
 
 config:
 	$(call message_primary, "SETUP ENVIRONMENT")
@@ -70,9 +71,30 @@ theme-setup:
 	$(call message_primary, "INSTALL PLUGINS")
 	ddev exec wp plugin install fluent-smtp --activate
 	ddev exec wp plugin install advanced-custom-fields --activate
-	ddev exec wp plugin install woocommerce --activate
+	#ddev exec wp plugin install woocommerce --activate
 
 	ddev exec wp theme install yootheme_wp_4.5.17.zip --activate
+
+install-theme:
+	ddev exec wp theme install $(WP_THEME) --activate
+
+install-plugins:
+	@echo "--- Initializing Plugin Installation ---"
+
+	@echo "1. Preparing target plugin directory: $(WP_PLUGINS_DEST_DIR)..."
+	ddev exec sudo chown -R www-data:www-data $(WP_PLUGINS_DEST_DIR) || { echo "ERROR: Failed to change ownership"; exit 1; }
+	ddev exec sudo chmod -R ug+rwX,o+rX $(WP_PLUGINS_DEST_DIR) || { echo "ERROR: Failed to set permissions"; exit 1; }
+
+	@echo "2. Installing WordPress core plugins..."
+	@for plugin in $(WP_CORE_PLUGINS); do \
+ 		echo "  - Installing $$plugin..."; \
+ 		ddev wp plugin install $$plugin --activate --skip-plugins --allow-root; \
+ 		if [ $$? -ne 0 ]; then \
+ 			echo "    Error: Failed to install and activate $$plugin."; \
+ 			exit 1; \
+ 		fi; \
+ 	done
+	@echo "All specified WordPress plugins installed and activated successfully!"
 
 install-github-plugins:
 	@echo "--- Initializing GitHub Plugin Installation ---"

@@ -10,12 +10,30 @@ endif
 # Set fallback values only if not defined in .env
 WP_HOME ?= https://$(PROJECT_NAME).ddev.site
 WP_SITEURL ?= $(WP_HOME)/wp
-DB_HOST ?= ddev-$(project_name)-db
+DB_HOST ?= ddev-$(PROJECT_NAME)-db
 DB_NAME ?= db
 DB_USER ?= db
 DB_PASSWORD ?= db
 DB_TABLE_PREFIX ?= ntdst_
 TEMPLATE_DIR ?= export
+
+# Configure DDEV server and download wordpress
+.PHONY: init
+init: 
+	echo "⚙️  Configuring server..."
+	ddev config
+	ddev config --webserver-type apache-fpm
+	ddev restart
+	ddev exec composer install
+
+
+	echo "📥 Downloading WordPress..."
+	ddev exec wp core download --force --version=$(WP_VERSION)
+
+	@echo "🧹 Cleaning up wp folder"
+	ddev exec rm -f $(INSTALL_PATH)/wp/readme.html $(INSTALL_PATH)/wp/license.txt
+	ddev exec rm -rf $(INSTALL_PATH)/wp/wp-content
+
 
 # Export the current site into a clean template
 .PHONY: export-site
@@ -65,7 +83,7 @@ endif
 
 	@echo "🔧 Cloning template $(TEMPLATE)..."
 	rm -rf $(TEMPLATE)
-	git clone --depth 1 git@$(GIT_BASE):$(TEMPLATE).git $(TEMPLATE)
+	git clone --depth 1 git@$(GIT_BASE)/$(TEMPLATE).git $(TEMPLATE)
 
 	@echo "🧩 Copying content..."
 	rm -rf $(INSTALL_PATH)/content
@@ -88,13 +106,6 @@ endif
 	@echo "✅ Site ready at $(WP_HOME)"
 
 
-init: 
-	ddev config
-	ddev config --webserver-type apache-fpm
-	ddev restart
-	ddev exec composer install
-
-
 config:
 	$(call message_primary, "SETUP ENVIRONMENT")
 	@if [ ! -f .env ]; then \
@@ -106,18 +117,6 @@ config:
 			exit 1; \
 		fi; \
 	fi; \
-
-get-wp:
-	ddev start
-	$(call message_primary, "DOWNLOAD WP $(WP_VERSION)")
-	ddev exec wp core download --force --version=$(WP_VERSION)
-
-	$(call message_primary, "VERSION WP")
-	ddev exec wp core version
-
-	@echo "🧹 Cleaning up wp folder"
-		ddev exec rm -f app/wp/readme.html app/wp/license.txt
-		ddev exec rm -rf app/wp/wp-content
 
 install-wp:
 	@echo "Running install-wp..."

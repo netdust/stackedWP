@@ -100,7 +100,7 @@ ifndef TEMPLATE
 endif
 
 	@echo "🔧 Cloning template $(TEMPLATE)..."
-	rm -rf $(TEMPLATE)
+	#rm -rf $(TEMPLATE)
 	git clone --depth 1 git@$(GIT_BASE)/$(TEMPLATE).git $(TEMPLATE)
 
 	@echo "🧩 Copying content..."
@@ -108,11 +108,10 @@ endif
 	cp -R $(TEMPLATE)/content $(INSTALL_PATH)/
 
 	@echo "🔁 Updating site URL and importing SQL into $(DB_NAME)..."
-	sed "s|__SITEURL__|$(WP_HOME)|g" $(TEMPLATE)/sql.sql | ddev exec mysql -u $(DB_USER) -p$(DB_PASSWORD) -h $(DB_HOST) $(DB_NAME)
+	ddev exec mysql -u $(DB_USER) -p$(DB_PASSWORD) -h $(DB_HOST) $(DB_NAME) < $(TEMPLATE)/sql.sql
+	ddev exec wp search-replace '__SITEURL__' '$(WP_HOME)' --all-tables
 
-	@echo "👤 Setting up admin user..."
-	ddev exec wp user delete $(ADMIN_USER) --yes
-	ddev exec wp user create $(ADMIN_USER) $(ADMIN_EMAIL) --user_pass=$(ADMIN_PASS) --role=administrator 
+	ddev wp cache flush
 
 	@echo "🧹 Flushing permalinks..."
 	ddev exec wp rewrite flush --hard 

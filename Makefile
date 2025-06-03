@@ -10,7 +10,7 @@ endif
 # Set fallback values only if not defined in .env
 WP_HOME ?= https://$(PROJECT_NAME).ddev.site
 WP_SITEURL ?= $(WP_HOME)/wp
-DB_HOST ?= ddev-$(PROJECT_NAME)-db
+DB_HOST ?= db
 DB_NAME ?= db
 DB_USER ?= db
 DB_PASSWORD ?= db

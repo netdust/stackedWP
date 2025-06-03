@@ -70,9 +70,18 @@ create-repo:
 	@echo "📁 Initializing Git repository in $(TEMPLATE_DIR)..."
 	cd $(TEMPLATE_DIR) && \
 	if [ ! -d .git ]; then \
-		git init -b master && \
+		git init -b main && \
 		git add . && \
 		git commit -m "Initial commit of WordPress site export"; \
+	else \
+		if ! git diff-index --quiet HEAD -- || [ "$$(git rev-list --all --count)" -eq 0 ]; then \
+			git add .; \
+			if ! git diff-index --quiet HEAD --; then \
+				git commit -m "Update WordPress site export"; \
+			elif [ "$$(git rev-list --all --count)" -eq 0 ]; then \
+				git commit --allow-empty -m "Initial empty commit for export"; \
+			fi; \
+		fi; \
 	fi
 
 	@echo "🌐 Creating or pushing to GitHub repo $(PROJECT_NAME)..."
@@ -81,14 +90,15 @@ create-repo:
 		gh repo create $(PROJECT_NAME) --private --source=. --remote=origin --push; \
 	else \
 		if ! git remote get-url origin > /dev/null 2>&1; then \
-  			git remote add origin git@$(GIT_BASE)/$(PROJECT_NAME).git; \
+			git remote add origin git@$(GIT_BASE)/$(PROJECT_NAME).git; \
 		else \
-  			git remote set-url origin git@$(GIT_BASE)/$(PROJECT_NAME).git; \
-		fi && \
-		git push -u origin master; \
+			git remote set-url origin git@$(GIT_BASE)/$(PROJECT_NAME).git; \
+		fi; \
+		git push -u origin main; \
 	fi
 
 	@echo "✅ GitHub repo created and pushed."
+
 
 
 

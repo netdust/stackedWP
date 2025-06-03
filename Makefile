@@ -34,23 +34,27 @@ init:
 	ddev exec rm -f $(INSTALL_PATH)/wp/readme.html $(INSTALL_PATH)/wp/license.txt
 	ddev exec rm -rf $(INSTALL_PATH)/wp/wp-content
 
-
-# Export the current site into a clean template
-.PHONY: export-site
-export-site:
-	@echo "📦 Exporting site as template"
-
+# Removing all junk data from db
+.PHONY: clean-db
+clean-db:
 	@echo "🧹 Cleaning database before export..."
 	ddev exec wp transient delete --all 
 	ddev exec wp option delete _site_transient_update_core
 	ddev exec wp option delete _site_transient_update_plugins
 	ddev exec wp option delete _site_transient_update_themes
 	ddev exec wp option delete user_count
-	ddev exec wp site empty --yes --uploads
+	ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)options WHERE option_name LIKE '_transient_%' OR option_name LIKE '_site_transient_%';"
 	ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)comments WHERE comment_approved = 'spam' OR comment_approved = 'trash';" 
 	ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)postmeta WHERE meta_key LIKE '_edit_lock' OR meta_key LIKE '_edit_last';" 
 	ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)posts WHERE post_status = 'auto-draft';" 
 	ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)posts WHERE post_type = 'revision';" 
+	ddev exec wp db query "DELETE pm FROM $(DB_TABLE_PREFIX)postmeta pm LEFT JOIN $(DB_TABLE_PREFIX)posts wp ON pm.post_id = wp.ID WHERE wp.ID IS NULL;"
+	ddev exec wp db query "DELETE cm FROM $(DB_TABLE_PREFIX)commentmeta cm LEFT JOIN $(DB_TABLE_PREFIX)comments wc ON cm.comment_id = wc.comment_ID WHERE wc.comment_ID IS NULL;"
+
+# Export the current site into a clean template
+.PHONY: export-site
+export-site: clean-db
+	@echo "📦 Exporting site as template"
 
 	@echo "📁 Saving cleaned export to $(TEMPLATE_DIR)..."
 	mkdir -p $(TEMPLATE_DIR)
@@ -64,14 +68,28 @@ export-site:
 
 create-repo:
 	@echo "📁 Initializing Git repository in $(TEMPLATE_DIR)..."
-	cd $(TEMPLATE_DIR) && git init
-	cd $(TEMPLATE_DIR) && git add .
-	cd $(TEMPLATE_DIR) && git commit -m "Initial commit of WordPress site export"
+	cd $(TEMPLATE_DIR) && \
+	if [ ! -d .git ]; then \
+		git init -b master && \
+		git add . && \
+		git commit -m "Initial commit of WordPress site export"; \
+	fi
 
-	@echo "🌐 Creating GitHub repo $(PROJECT_NAME)..."
-	cd $(TEMPLATE_DIR) && gh repo create $(PROJECT_NAME) --private --source=. --remote=origin --push
+	@echo "🌐 Creating or pushing to GitHub repo $(PROJECT_NAME)..."
+	cd $(TEMPLATE_DIR) && \
+	if ! gh repo view $(PROJECT_NAME) > /dev/null 2>&1; then \
+		gh repo create $(PROJECT_NAME) --private --source=. --remote=origin --push; \
+	else \
+		if ! git remote get-url origin > /dev/null 2>&1; then \
+  			git remote add origin git@$(GIT_BASE)/$(PROJECT_NAME).git; \
+		else \
+  			git remote set-url origin git@$(GIT_BASE)/$(PROJECT_NAME).git; \
+		fi && \
+		git push -u origin master; \
+	fi
 
 	@echo "✅ GitHub repo created and pushed."
+
 
 
 # Import a site from a remote template repo
@@ -257,5 +275,3 @@ fix-host-permissions:
 	@sudo chmod -R u+rwX,g+rwX,o+rX $(HOST_PATH)$(WP_THEMES_DEST_DIR) || { echo "ERROR: Failed to set permissions on host."; exit 1; }
 	@sudo chown -R $(shell id -un):$(shell id -gn) $(HOST_PATH)$(WP_THEMES_DEST_DIR) || { echo "ERROR: Failed to change ownership on host."; exit 1; }
 	@echo "Host permissions for themes fixed."
-
-	

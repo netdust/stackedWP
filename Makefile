@@ -1,5 +1,4 @@
-.PHONY: init, config, get-wp, install-wp, dev, stop, drop, open-db, config-wp
-
+# Load environment variables from .env
 ifeq ($(wildcard .env.local),.env.local)
     include .env.local
     export $(shell sed 's/^#.*//g' .env.local | sed '/^$$/d' | cut -d'=' -f1)
@@ -8,6 +7,85 @@ ifeq ($(wildcard .env.local),.env.local)
     GITHUB_PLUGINS_REPOS := $(strip $(subst ",,$(GITHUB_PLUGINS_REPOS)))
 endif
 
+# Set fallback values only if not defined in .env
+WP_HOME ?= https://$(PROJECT_NAME).ddev.site
+WP_SITEURL ?= $(WP_HOME)/wp
+DB_HOST ?= ddev-$(project_name)-db
+DB_NAME ?= db
+DB_USER ?= db
+DB_PASSWORD ?= db
+DB_TABLE_PREFIX ?= ntdst_
+TEMPLATE_DIR ?= export
+
+# Export the current site into a clean template
+.PHONY: export-site
+export-site:
+	@echo "📦 Exporting site as template"
+
+	@echo "🧹 Cleaning database before export..."
+	ddev exec wp transient delete --all 
+	ddev exec wp option delete _site_transient_update_core
+	ddev exec wp option delete _site_transient_update_plugins
+	ddev exec wp option delete _site_transient_update_themes
+	ddev exec wp option delete user_count
+	ddev exec wp site empty --yes --uploads
+	ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)comments WHERE comment_approved = 'spam' OR comment_approved = 'trash';" 
+	ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)postmeta WHERE meta_key LIKE '_edit_lock' OR meta_key LIKE '_edit_last';" 
+	ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)posts WHERE post_status = 'auto-draft';" 
+	ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)posts WHERE post_type = 'revision';" 
+
+	@echo "📁 Saving cleaned export to $(TEMPLATE_DIR)..."
+	mkdir -p $(TEMPLATE_DIR)
+	cp -R $(INSTALL_PATH)/content $(TEMPLATE_DIR)/
+	ddev exec wp db export $(TEMPLATE_DIR)/sql.sql  
+	sed -i "s|$(WP_HOME)|__SITEURL__|g" $(TEMPLATE_DIR)/sql.sql
+
+	@echo "✅ Export complete: $(TEMPLATE_DIR)"
+
+.PHONY: create-repo
+
+create-repo:
+	@echo "📁 Initializing Git repository in $(TEMPLATE_DIR)..."
+	cd $(TEMPLATE_DIR) && git init
+	cd $(TEMPLATE_DIR) && git add .
+	cd $(TEMPLATE_DIR) && git commit -m "Initial commit of WordPress site export"
+
+	@echo "🌐 Creating GitHub repo $(PROJECT_NAME)..."
+	cd $(TEMPLATE_DIR) && gh repo create $(PROJECT_NAME) --private --source=. --remote=origin --push
+
+	@echo "✅ GitHub repo created and pushed."
+
+
+# Import a site from a remote template repo
+.PHONY: import-site
+import-site:
+ifndef TEMPLATE
+	$(error TEMPLATE is not set. Usage: make import-site TEMPLATE=portfolio)
+endif
+
+	@echo "🔧 Cloning template $(TEMPLATE)..."
+	rm -rf $(TEMPLATE)
+	git clone --depth 1 git@$(GIT_BASE):$(TEMPLATE).git $(TEMPLATE)
+
+	@echo "🧩 Copying content..."
+	rm -rf $(INSTALL_PATH)/content
+	cp -R $(TEMPLATE)/content $(INSTALL_PATH)/
+
+	@echo "🔁 Updating site URL and importing SQL into $(DB_NAME)..."
+	sed "s|__SITEURL__|$(WP_HOME)|g" $(TEMPLATE)/sql.sql | ddev exec mysql -u $(DB_USER) -p$(DB_PASSWORD) -h $(DB_HOST) $(DB_NAME)
+
+	@echo "👤 Setting up admin user..."
+	ddev exec wp user delete $(ADMIN_USER) --yes
+	ddev exec wp user create $(ADMIN_USER) $(ADMIN_EMAIL) --user_pass=$(ADMIN_PASS) --role=administrator 
+
+	@echo "🧹 Flushing permalinks..."
+	ddev exec wp rewrite flush --hard 
+
+	@echo "🧼 Cleaning up..."
+	rm -rf $(TEMPLATE)
+	find $(INSTALL_PATH) -name 'Zone.Identifier' -type f -delete
+
+	@echo "✅ Site ready at $(WP_HOME)"
 
 
 init: 

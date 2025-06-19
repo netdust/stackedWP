@@ -34,6 +34,82 @@ init:
 	ddev exec rm -f $(INSTALL_PATH)/wp/readme.html $(INSTALL_PATH)/wp/license.txt
 	ddev exec rm -rf $(INSTALL_PATH)/wp/wp-content
 
+# Install Wordpress with default settings from env.local
+.PHONY: install-wp
+install-wp:
+	@echo "Running install-wp..."
+	ddev exec wp db check >/dev/null 2>&1 || ddev exec wp db create
+	@echo "INSTALL WP"
+	ddev exec wp core install \
+		--url='$(WP_HOME)' \
+		--title='$(WP_BLOGNAME)' \
+		--admin_user='$(ADMIN_USER)' \
+		--admin_password='$(ADMIN_PASS)' \
+		--admin_email='$(ADMIN_EMAIL)' \
+		--skip-plugins=hello \
+		--skip-themes=twentyfifteen,twentysixteen,twentyseventeen,twentynineteen,twentytwenty
+
+	@echo "WordPress installed!"
+
+# configure wordpress for a default empty theme using settings from env.local
+.PHONY: config-wp
+config-wp:
+	@echo "Configuring WordPress General Settings..."
+	
+
+	ddev exec wp option update blogname '$(WP_BLOGNAME)'
+	ddev exec wp option update blogdescription '$(WP_BLOGDESCRIPTION)'
+	ddev exec wp option update WPLANG '$(WP_WPLANG)'
+	ddev exec wp option update timezone_string '$(WP_TIMEZONE)'
+	ddev exec wp option update date_format 'd/m/Y'
+	ddev exec wp option update time_format 'H:i'
+
+	ddev exec wp post create --post_type=page --post_title="Home" --post_status=publish --allow-root
+	ddev exec wp option update show_on_front 'page' --allow-root
+	ddev exec wp option update page_on_front 5 --allow-root
+
+	ddev exec wp option update default_comment_status 'closed' --allow-root
+
+	$(call message_primary, "PERMALINKS")
+	ddev exec wp option get permalink_structure
+	ddev exec wp option update permalink_structure '/%postname%'
+	ddev exec wp rewrite flush --hard
+
+	ddev exec wp widget reset --all --allow-root
+
+	@echo "WordPress Settings Applied!"
+
+
+# Import a site from a remote template repo to have a flying start
+.PHONY: import-site
+import-site:
+ifndef TEMPLATE
+	$(error TEMPLATE is not set. Usage: make import-site TEMPLATE=portfolio)
+endif
+
+	@echo "🔧 Cloning template $(TEMPLATE)..."
+	#rm -rf $(TEMPLATE)
+	git clone --depth 1 git@$(GIT_BASE)/$(TEMPLATE).git $(TEMPLATE)
+
+	@echo "🧩 Copying content..."
+	rm -rf $(INSTALL_PATH)/content
+	cp -R $(TEMPLATE)/content $(INSTALL_PATH)/
+
+	@echo "🔁 Updating site URL and importing SQL into $(DB_NAME)..."
+	ddev exec mysql -u $(DB_USER) -p$(DB_PASSWORD) -h $(DB_HOST) $(DB_NAME) < $(TEMPLATE)/sql.sql
+	ddev exec wp search-replace '__SITEURL__' '$(WP_HOME)' --all-tables
+
+	ddev wp cache flush
+
+	@echo "🧹 Flushing permalinks..."
+	ddev exec wp rewrite flush --hard 
+
+	@echo "🧼 Cleaning up..."
+	rm -rf $(TEMPLATE)
+	find $(INSTALL_PATH) -name 'Zone.Identifier' -type f -delete
+
+	@echo "✅ Site ready at $(WP_HOME)"
+
 # Removing all junk data from db
 .PHONY: clean-db
 clean-db:
@@ -64,8 +140,8 @@ export-site: clean-db
 
 	@echo "✅ Export complete: $(TEMPLATE_DIR)"
 
+# Create a repo from the website for further use as template
 .PHONY: create-repo
-
 create-repo:
 	@echo "📁 Initializing Git repository in $(TEMPLATE_DIR)..."
 	cd $(TEMPLATE_DIR) && \
@@ -100,39 +176,6 @@ create-repo:
 	@echo "✅ GitHub repo created and pushed."
 
 
-
-
-# Import a site from a remote template repo
-.PHONY: import-site
-import-site:
-ifndef TEMPLATE
-	$(error TEMPLATE is not set. Usage: make import-site TEMPLATE=portfolio)
-endif
-
-	@echo "🔧 Cloning template $(TEMPLATE)..."
-	#rm -rf $(TEMPLATE)
-	git clone --depth 1 git@$(GIT_BASE)/$(TEMPLATE).git $(TEMPLATE)
-
-	@echo "🧩 Copying content..."
-	rm -rf $(INSTALL_PATH)/content
-	cp -R $(TEMPLATE)/content $(INSTALL_PATH)/
-
-	@echo "🔁 Updating site URL and importing SQL into $(DB_NAME)..."
-	ddev exec mysql -u $(DB_USER) -p$(DB_PASSWORD) -h $(DB_HOST) $(DB_NAME) < $(TEMPLATE)/sql.sql
-	ddev exec wp search-replace '__SITEURL__' '$(WP_HOME)' --all-tables
-
-	ddev wp cache flush
-
-	@echo "🧹 Flushing permalinks..."
-	ddev exec wp rewrite flush --hard 
-
-	@echo "🧼 Cleaning up..."
-	rm -rf $(TEMPLATE)
-	find $(INSTALL_PATH) -name 'Zone.Identifier' -type f -delete
-
-	@echo "✅ Site ready at $(WP_HOME)"
-
-
 config:
 	$(call message_primary, "SETUP ENVIRONMENT")
 	@if [ ! -f .env ]; then \
@@ -144,47 +187,6 @@ config:
 			exit 1; \
 		fi; \
 	fi; \
-
-install-wp:
-	@echo "Running install-wp..."
-	ddev exec wp db check >/dev/null 2>&1 || ddev exec wp db create
-	@echo "INSTALL WP"
-	ddev exec wp core install \
-		--url='$(WP_HOME)' \
-		--title='$(WP_TITLE)' \
-		--admin_user='$(WP_USER)' \
-		--admin_password='$(WP_PASSWORD)' \
-		--admin_email='$(WP_EMAIL)' \
-		--skip-plugins=hello \
-		--skip-themes=twentyfifteen,twentysixteen,twentyseventeen,twentynineteen,twentytwenty
-
-	@echo "WordPress installed!"
-
-config-wp:
-	@echo "Configuring WordPress General Settings..."
-	
-
-	ddev exec wp option update blogname '$(WP_BLOGNAME)'
-	ddev exec wp option update blogdescription '$(WP_BLOGDESCRIPTION)'
-	ddev exec wp option update WPLANG '$(WP_WPLANG)'
-	ddev exec wp option update timezone_string '$(WP_TIMEZONE)'
-	ddev exec wp option update date_format 'd/m/Y'
-	ddev exec wp option update time_format 'H:i'
-
-	ddev exec wp post create --post_type=page --post_title="Home" --post_status=publish --allow-root
-	ddev exec wp option update show_on_front 'page' --allow-root
-	ddev exec wp option update page_on_front 5 --allow-root
-
-	ddev exec wp option update default_comment_status 'closed' --allow-root
-
-	$(call message_primary, "PERMALINKS")
-	ddev exec wp option get permalink_structure
-	ddev exec wp option update permalink_structure '/%postname%'
-	ddev exec wp rewrite flush --hard
-
-	ddev exec wp widget reset --all --allow-root
-
-	@echo "WordPress Settings Applied!"
 
 
 install-themes:

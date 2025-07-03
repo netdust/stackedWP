@@ -231,14 +231,15 @@ install-plugins:
  	done
 	@echo "All specified WordPress plugins installed and activated successfully!"
 
-install-github-plugins:
+install-git-plugins:
 	@echo "--- Initializing GitHub Plugin Installation ---"
 	@echo "1. Ensuring DDEV SSH Agent is Authenticated..."
-	ddev auth ssh || { echo "ERROR: ddev auth ssh failed. Ensure your SSH agent is running and keys are added (e.g., 'eval \"\$$\(ssh-agent -s\)\"; ssh-add ~/.ssh/id_ed25519')"; exit 1; }
+	@ddev auth ssh || { echo "ERROR: ddev auth ssh failed. Ensure your SSH agent is running and keys are added (e.g., 'eval \"\$$\(ssh-agent -s\)\"; ssh-add ~/.ssh/id_ed25519')"; exit 1; }
 
-	@echo "2. Preparing target plugin directory: $(WP_PLUGINS_DEST_DIR)..."
-	ddev exec sudo chown -R www-data:www-data $(WP_PLUGINS_DEST_DIR) || { echo "ERROR: Failed to change ownership"; exit 1; }
-	ddev exec sudo chmod -R ug+rwX,o+rX $(WP_PLUGINS_DEST_DIR) || { echo "ERROR: Failed to set permissions"; exit 1; }
+	@echo "2. Preparing plugin directory $(WP_PLUGINS_DEST_DIR) on host..."
+	@mkdir -p $(WP_PLUGINS_DEST_DIR)
+	@sudo chown -R $(USER):$(USER) $(WP_PLUGINS_DEST_DIR)
+	@chmod -R ug+rwX,o+rX $(WP_PLUGINS_DEST_DIR)
 
 	@echo "3. Cloning and Activating GitHub Plugins..."
 	@for repo_url in $(GITHUB_PLUGINS_REPOS); do \
@@ -250,6 +251,7 @@ install-github-plugins:
 	done
 
 	@echo "--- GitHub Plugins Installation Complete ---"
+
 
 
 update-wp:
@@ -272,17 +274,3 @@ open-db:
 
 drop:
 	ddev exec mysql -e "DROP DATABASE IF EXISTS db; CREATE DATABASE db;"
-
-# Target to fix host permissions for the plugins directory
-fix-host-permissions:
-	@echo "--- Fixing host permissions for plugins directory: $(HOST_PATH)$(WP_PLUGINS_DEST_DIR) ---"
-	@mkdir -p $(HOST_PATH)$(WP_PLUGINS_DEST_DIR)
-	@sudo chmod -R u+rwX,g+rwX,o+rX $(HOST_PATH)$(WP_PLUGINS_DEST_DIR) || { echo "ERROR: Failed to set permissions on host."; exit 1; }
-	@sudo chown -R $(shell id -un):$(shell id -gn) $(HOST_PATH)$(WP_PLUGINS_DEST_DIR) || { echo "ERROR: Failed to change ownership on host."; exit 1; }
-	@echo "Host permissions for plugins fixed."
-
-	@echo "--- Fixing host permissions for themes directory: $(HOST_PATH)$(WP_THEMES_DEST_DIR) ---"
-	@mkdir -p $(HOST_PATH)$(WP_THEMES_DEST_DIR)
-	@sudo chmod -R u+rwX,g+rwX,o+rX $(HOST_PATH)$(WP_THEMES_DEST_DIR) || { echo "ERROR: Failed to set permissions on host."; exit 1; }
-	@sudo chown -R $(shell id -un):$(shell id -gn) $(HOST_PATH)$(WP_THEMES_DEST_DIR) || { echo "ERROR: Failed to change ownership on host."; exit 1; }
-	@echo "Host permissions for themes fixed."

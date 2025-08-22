@@ -1,4 +1,5 @@
-# Load environment variables from .env
+# 1. Environment & Defaults
+# Load environment variables from .env.local if it exists
 ifeq ($(wildcard .env.local),.env.local)
     include .env.local
     export $(shell sed 's/^#.*//g' .env.local | sed '/^$$/d' | cut -d'=' -f1)
@@ -7,7 +8,7 @@ ifeq ($(wildcard .env.local),.env.local)
     GITHUB_PLUGINS_REPOS := $(strip $(subst ",,$(GITHUB_PLUGINS_REPOS)))
 endif
 
-# Set fallback values only if not defined in .env
+# Default fallbacks if not set in .env
 WP_HOME ?= https://$(PROJECT_NAME).ddev.site
 WP_SITEURL ?= $(WP_HOME)/wp
 DB_HOST ?= db
@@ -17,8 +18,8 @@ DB_PASSWORD ?= db
 DB_TABLE_PREFIX ?= ntdst_
 TEMPLATE_DIR ?= export
 
-# Configure DDEV server and download wordpress
-.PHONY: init
+# 2. Environment & WordPress Setup
+.PHONY: init config install-wp config-wp
 init: 
 	echo "⚙️  Configuring server..."
 	ddev config
@@ -34,8 +35,18 @@ init:
 	ddev exec rm -f $(INSTALL_PATH)/wp/readme.html $(INSTALL_PATH)/wp/license.txt
 	ddev exec rm -rf $(INSTALL_PATH)/wp/wp-content
 
-# Install Wordpress with default settings from env.local
-.PHONY: install-wp
+config:
+	$(call message_primary, "SETUP ENVIRONMENT")
+	@if [ ! -f .env ]; then \
+		if [ -f .env.example ]; then \
+			cp .env.example app/.env; \
+			echo ".env file created from .env.example"; \
+		else \
+			echo "Error: .env.example file not found"; \
+			exit 1; \
+		fi; \
+	fi; \
+
 install-wp:
 	@echo "Running install-wp..."
 	ddev exec wp db check >/dev/null 2>&1 || ddev exec wp db create
@@ -51,8 +62,6 @@ install-wp:
 
 	@echo "WordPress installed!"
 
-# configure wordpress for a default empty theme using settings from env.local
-.PHONY: config-wp
 config-wp:
 	@echo "Configuring WordPress General Settings..."
 	
@@ -79,10 +88,28 @@ config-wp:
 
 	@echo "WordPress Settings Applied!"
 
+# 3. Site Import / Export
+# Export the current site into a clean template
+.PHONY: export-site import-site
+export-site: clean-db
+	@echo "📦 Exporting site as template"
 
+	@echo "📁 Saving cleaned export to $(TEMPLATE_DIR)..."
+	@mkdir -p $(TEMPLATE_DIR)
+	@cp -R $(INSTALL_PATH)/content $(TEMPLATE_DIR)/ >/dev/null 2>&1 && \
+		echo "   ✅ Content copied" || { echo "   ❌ ERROR copying content"; exit 1; }
+
+	@echo "💾 Exporting database..."
+	@ddev exec wp db export $(TEMPLATE_DIR)/sql.sql >/dev/null 2>&1 && \
+		echo "   ✅ Database exported" || { echo "   ❌ ERROR exporting database"; exit 1; }
+
+	@echo "🔧 Replacing site URL with placeholder..."
+	@sed -i "s|$(WP_HOME)|__SITEURL__|g" $(TEMPLATE_DIR)/sql.sql && \
+		echo "   ✅ URL replaced" || { echo "   ❌ ERROR updating SQL file"; exit 1; }
+
+	@echo "✅ Export complete: $(TEMPLATE_DIR)"
 
 # Import a site from a remote template repo to have a flying start
-.PHONY: import-site
 import-site:
 ifndef TEMPLATE
 	$(error TEMPLATE is not set. Usage: make import-site TEMPLATE=portfolio)
@@ -124,7 +151,7 @@ endif
 
 	@echo "✅ Site imported and ready at: $(WP_HOME)"
 
-# Removing all junk data from db
+# 4. Database Utilities
 .PHONY: clean-db
 clean-db:
 	@echo "🧹 Cleaning database before export..."
@@ -150,7 +177,8 @@ clean-db:
 	@echo "      ✅ Posts & metadata cleaned"
 
 	@echo "✅ Database cleaned"
-# Use vite to build all assets for the project
+
+# 5. Assets
 .PHONY: build-assets
 build-assets:
 	@echo "⚡ Building assets with Vite..."
@@ -159,6 +187,7 @@ build-assets:
 		npm run build >/dev/null 2>&1 && \
 		echo "   ✅ Assets built" || { echo "   ❌ ERROR building assets"; exit 1; }
 
+# 6. Git / Template Repo
 # Create a repo from the website for further use as template
 .PHONY: create-repo
 create-repo:
@@ -217,84 +246,8 @@ create-repo:
 
 	@echo "✅ Done!"
 
-
-# Export the current site into a clean template
-.PHONY: export-site
-export-site: clean-db
-	@echo "📦 Exporting site as template"
-
-	@echo "📁 Saving cleaned export to $(TEMPLATE_DIR)..."
-	@mkdir -p $(TEMPLATE_DIR)
-	@cp -R $(INSTALL_PATH)/content $(TEMPLATE_DIR)/ >/dev/null 2>&1 && \
-		echo "   ✅ Content copied" || { echo "   ❌ ERROR copying content"; exit 1; }
-
-	@echo "💾 Exporting database..."
-	@ddev exec wp db export $(TEMPLATE_DIR)/sql.sql >/dev/null 2>&1 && \
-		echo "   ✅ Database exported" || { echo "   ❌ ERROR exporting database"; exit 1; }
-
-	@echo "🔧 Replacing site URL with placeholder..."
-	@sed -i "s|$(WP_HOME)|__SITEURL__|g" $(TEMPLATE_DIR)/sql.sql && \
-		echo "   ✅ URL replaced" || { echo "   ❌ ERROR updating SQL file"; exit 1; }
-
-	@echo "✅ Export complete: $(TEMPLATE_DIR)"
-
-# Import a site from a remote template repo to have a flying start
-.PHONY: import-site
-import-site:
-ifndef TEMPLATE
-	$(error TEMPLATE is not set. Usage: make import-site TEMPLATE=portfolio)
-endif
-
-	@echo "🔧 Cloning template: $(TEMPLATE)"
-	@if git clone --depth 1 git@$(GIT_BASE)/$(TEMPLATE).git $(TEMPLATE) >/dev/null 2>&1; then \
-		echo "   ✅ Template cloned"; \
-	else \
-		echo "   ❌ ERROR: Failed to clone repo $(TEMPLATE)"; \
-		exit 1; \
-	fi
-
-	@echo "🧩 Copying content into WordPress..."
-	@rm -rf $(INSTALL_PATH)/content
-	@cp -R $(TEMPLATE)/content $(INSTALL_PATH)/ >/dev/null 2>&1 && \
-		echo "   ✅ Content copied" || { echo "   ❌ ERROR copying content"; exit 1; }
-
-	@echo "🔁 Importing database into $(DB_NAME)..."
-	@ddev exec mysql -u $(DB_USER) -p$(DB_PASSWORD) -h $(DB_HOST) $(DB_NAME) < $(TEMPLATE)/sql.sql >/dev/null 2>&1 && \
-		echo "   ✅ Database imported" || { echo "   ❌ ERROR importing database"; exit 1; }
-
-	@echo "🔧 Replacing placeholder URLs..."
-	@ddev exec wp search-replace '__SITEURL__' '$(WP_HOME)' --all-tables >/dev/null 2>&1 && \
-		echo "   ✅ URLs updated" || { echo "   ❌ ERROR updating URLs"; exit 1; }
-
-	@echo "🧹 Flushing caches..."
-	@ddev exec wp cache flush >/dev/null 2>&1 && \
-		echo "   ✅ Cache flushed"
-
-	@echo "🔗 Flushing permalinks..."
-	@ddev exec wp rewrite flush --hard >/dev/null 2>&1 && \
-		echo "   ✅ Permalinks flushed"
-
-	@echo "🧼 Cleaning up temporary files..."
-	@rm -rf $(TEMPLATE)
-	@find $(INSTALL_PATH) -name 'Zone.Identifier' -type f -delete
-	@echo "   ✅ Cleanup complete"
-
-	@echo "✅ Site imported and ready at: $(WP_HOME)"
-
-
-config:
-	$(call message_primary, "SETUP ENVIRONMENT")
-	@if [ ! -f .env ]; then \
-		if [ -f .env.example ]; then \
-			cp .env.example app/.env; \
-			echo ".env file created from .env.example"; \
-		else \
-			echo "Error: .env.example file not found"; \
-			exit 1; \
-		fi; \
-	fi; \
-
-
+# 7. Themes & Plugins
+.PHONY: install-themes install-themes-zip install-plugins install-git-plugins
 install-themes:
 	ddev exec wp theme install $(WP_THEMES) --activate
 	@echo "--- Initializing Theme Installation ---"
@@ -358,8 +311,8 @@ install-git-plugins:
 
 	@echo "--- GitHub Plugins Installation Complete ---"
 
-
-
+# 8. Updates
+.PHONY: update-wp update-plugins update-git update-all
 update-wp:
 	ddev exec wp core update
 
@@ -374,10 +327,4 @@ update-all: update-git update-wp
 	git submodule foreach git pull origin main
 	git submodule foreach git checkout main
 
-open-db:
-	@echo "Opening the database for direct access"
-	open mysql://wordpress:wordpress@127.0.0.1:$$(lando info --service=database --path 0.external_connection.port | tr -d "'")/wordpress?enviroment=local&name=$database&safeModeLevel=0&advancedSafeModeLevel=0
-
-drop:
-	ddev exec mysql -e "DROP DATABASE IF EXISTS db; CREATE DATABASE db;"
 

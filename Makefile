@@ -1,5 +1,45 @@
+# ============================================================================
+# WordPress + DDEV Project Makefile
+# ----------------------------------------------------------------------------
+# Purpose
+#   Automate common tasks for a DDEV-based WordPress project: initializing the
+#   environment, installing/configuring WordPress, exporting/importing a site
+#   template, cleaning the DB, building theme assets, managing Git/GitHub, and
+#   installing/updating themes/plugins (including GitHub-hosted ones).
+#
+# Prerequisites
+#   - DDEV (https://ddev.readthedocs.io/)
+#   - WP-CLI inside DDEV (ddev exec wp ...)
+#   - Composer (used via ddev exec composer)
+#   - Node.js + npm for building assets (inside theme directory)
+#   - Git and, if using GitHub operations, the GitHub CLI (gh) and SSH auth
+#
+# Quick start
+#   1) Configure env:  make init
+#   2) Install WP:     make install-wp
+#   3) Configure WP:   make config-wp
+#   4) Themes/plugins: make install-themes install-plugins (and/or install-git-plugins)
+#
+# Useful targets
+#   - export-site:  Export sanitized content + DB to TEMPLATE_DIR for reuse
+#   - import-site:  Import a template repo into this instance (TEMPLATE=repo)
+#   - clean-db:     Remove transients, junk posts/comments, etc. before export
+#   - build-assets: Build frontend assets via npm in your theme directory
+#   - create-repo:  Initialize/push export folder to new/existing GitHub repo
+#   - update-*:     Update WP core, plugins, and git submodules
+#
+# Notes
+#   - Environment variables are primarily read from .env.local (if present).
+#   - Some defaults are set below as fallbacks.
+#   - This Makefile uses ddev exec to run commands inside the container.
+# ============================================================================
+
+# ----------------------------------------------------------------------------
 # 1. Environment & Defaults
-# Load environment variables from .env.local if it exists
+# ----------------------------------------------------------------------------
+# Load environment variables from .env.local when present. We expose variables
+# by exporting all keys found in .env.local (ignoring comments and empty lines).
+# Some variables (with quotes) are stripped for safety.
 ifeq ($(wildcard .env.local),.env.local)
     include .env.local
     export $(shell sed 's/^#.*//g' .env.local | sed '/^$$/d' | cut -d'=' -f1)
@@ -8,7 +48,8 @@ ifeq ($(wildcard .env.local),.env.local)
     GITHUB_PLUGINS_REPOS := $(strip $(subst ",,$(GITHUB_PLUGINS_REPOS)))
 endif
 
-# Default fallbacks if not set in .env
+# Default fallbacks if not provided via .env.local
+# PROJECT_NAME must typically come from .ddev/config.yaml or your env
 WP_HOME ?= https://$(PROJECT_NAME).ddev.site
 WP_SITEURL ?= $(WP_HOME)/wp
 DB_HOST ?= db
@@ -18,9 +59,28 @@ DB_PASSWORD ?= db
 DB_TABLE_PREFIX ?= ntdst_
 TEMPLATE_DIR ?= export
 
+# Expected additional envs (commonly defined in .env.local):
+# - INSTALL_PATH:       WP docroot inside container (e.g., app or .)
+# - THEME_NAME:         Active theme folder name under content/themes/
+# - WP_VERSION:         Target WP version for download (e.g., 6.5.5)
+# - ADMIN_USER/PASS/EMAIL: WP admin credentials for install
+# - WP_WPLANG, WP_TIMEZONE: WP locale/timezone (e.g., en_US, Europe/Paris)
+# - WP_THEMES:          Space-separated list of themes to install from wp.org
+# - WP_THEMES_DEST_DIR: Absolute path to wp-content/themes (inside container)
+# - WP_THEMES_ZIP:      Space-separated list of zip URLs/paths for custom themes
+# - WP_PLUGINS:         Space-separated list of plugins to install from wp.org
+# - WP_PLUGINS_DEST_DIR: Absolute path to wp-content/plugins (inside container)
+# - GITHUB_PLUGINS_REPOS: Space-separated git+ssh repo URLs for plugins
+# - GIT_BASE:           e.g., github.com:<org> (used by gh and git remote URLs)
+# - PROJECT_NAME:       Used when creating/viewing GitHub repos
+
+# ----------------------------------------------------------------------------
 # 2. Environment & WordPress Setup
+# ----------------------------------------------------------------------------
 .PHONY: init config install-wp config-wp
-init: 
+
+# init: Configure DDEV, restart environment, install PHP deps, and download WP.
+init:
 	echo "⚙️  Configuring server..."
 	ddev config
 	ddev config --webserver-type apache-fpm
@@ -35,6 +95,9 @@ init:
 	ddev exec rm -f $(INSTALL_PATH)/wp/readme.html $(INSTALL_PATH)/wp/license.txt
 	ddev exec rm -rf $(INSTALL_PATH)/wp/wp-content
 
+# config: Ensure an environment file exists.
+# NOTE: This copies .env.example to app/.env if .env is missing.
+#       Verify paths (.env vs .env.local) match your convention.
 config:
 	$(call message_primary, "SETUP ENVIRONMENT")
 	@if [ ! -f .env ]; then \
@@ -47,6 +110,7 @@ config:
 		fi; \
 	fi; \
 
+# install-wp: Create DB if needed and perform WP installation with provided vars.
 install-wp:
 	@echo "Running install-wp..."
 	ddev exec wp db check >/dev/null 2>&1 || ddev exec wp db create
@@ -62,9 +126,10 @@ install-wp:
 
 	@echo "WordPress installed!"
 
+# config-wp: Apply general settings, create a Home page, set permalinks, etc.
 config-wp:
 	@echo "Configuring WordPress General Settings..."
-	
+
 
 	ddev exec wp option update blogname '$(WP_BLOGNAME)'
 	ddev exec wp option update blogdescription '$(WP_BLOGDESCRIPTION)'
@@ -88,10 +153,12 @@ config-wp:
 
 	@echo "WordPress Settings Applied!"
 
+# ----------------------------------------------------------------------------
 # 3. Site Import / Export
-# Export the current site into a clean template
-.PHONY: export-site import-site
-export-site: clean-db
+# ----------------------------------------------------------------------------
+.PHONY: create-template export-site import-site
+# create-template: Clean DB then export content and SQL into TEMPLATE_DIR.
+create-template: clean-db
 	@echo "📦 Exporting site as template"
 
 	@echo "📁 Saving cleaned export to $(TEMPLATE_DIR)..."
@@ -109,88 +176,9 @@ export-site: clean-db
 
 	@echo "✅ Export complete: $(TEMPLATE_DIR)"
 
-# Import a site from a remote template repo to have a flying start
-import-site:
-ifndef TEMPLATE
-	$(error TEMPLATE is not set. Usage: make import-site TEMPLATE=portfolio)
-endif
-
-	@echo "🔧 Cloning template: $(TEMPLATE)"
-	@if git clone --depth 1 git@$(GIT_BASE)/$(TEMPLATE).git $(TEMPLATE) >/dev/null 2>&1; then \
-		echo "   ✅ Template cloned"; \
-	else \
-		echo "   ❌ ERROR: Failed to clone repo $(TEMPLATE)"; \
-		exit 1; \
-	fi
-
-	@echo "🧩 Copying content into WordPress..."
-	@rm -rf $(INSTALL_PATH)/content
-	@cp -R $(TEMPLATE)/content $(INSTALL_PATH)/ >/dev/null 2>&1 && \
-		echo "   ✅ Content copied" || { echo "   ❌ ERROR copying content"; exit 1; }
-
-	@echo "🔁 Importing database into $(DB_NAME)..."
-	@ddev exec mysql -u $(DB_USER) -p$(DB_PASSWORD) -h $(DB_HOST) $(DB_NAME) < $(TEMPLATE)/sql.sql >/dev/null 2>&1 && \
-		echo "   ✅ Database imported" || { echo "   ❌ ERROR importing database"; exit 1; }
-
-	@echo "🔧 Replacing placeholder URLs..."
-	@ddev exec wp search-replace '__SITEURL__' '$(WP_HOME)' --all-tables >/dev/null 2>&1 && \
-		echo "   ✅ URLs updated" || { echo "   ❌ ERROR updating URLs"; exit 1; }
-
-	@echo "🧹 Flushing caches..."
-	@ddev exec wp cache flush >/dev/null 2>&1 && \
-		echo "   ✅ Cache flushed"
-
-	@echo "🔗 Flushing permalinks..."
-	@ddev exec wp rewrite flush --hard >/dev/null 2>&1 && \
-		echo "   ✅ Permalinks flushed"
-
-	@echo "🧼 Cleaning up temporary files..."
-	@rm -rf $(TEMPLATE)
-	@find $(INSTALL_PATH) -name 'Zone.Identifier' -type f -delete
-	@echo "   ✅ Cleanup complete"
-
-	@echo "✅ Site imported and ready at: $(WP_HOME)"
-
-# 4. Database Utilities
-.PHONY: clean-db
-clean-db:
-	@echo "🧹 Cleaning database before export..."
-
-	@echo "   🗑️  Deleting transients..."
-	@ddev exec wp transient delete --all >/dev/null 2>&1 || true
-	@ddev exec wp option delete _site_transient_update_core >/dev/null 2>&1 || true
-	@ddev exec wp option delete _site_transient_update_plugins >/dev/null 2>&1 || true
-	@ddev exec wp option delete _site_transient_update_themes >/dev/null 2>&1 || true
-	@ddev exec wp option delete user_count >/dev/null 2>&1 || true
-	@ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)options WHERE option_name LIKE '_transient_%' OR option_name LIKE '_site_transient_%';" >/dev/null 2>&1 || true
-	@echo "      ✅ Transients cleaned"
-
-	@echo "   🗑️  Removing junk comments..."
-	@ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)comments WHERE comment_approved IN ('spam','trash');" >/dev/null 2>&1 || true
-	@ddev exec wp db query "DELETE cm FROM $(DB_TABLE_PREFIX)commentmeta cm LEFT JOIN $(DB_TABLE_PREFIX)comments wc ON cm.comment_id = wc.comment_ID WHERE wc.comment_ID IS NULL;" >/dev/null 2>&1 || true
-	@echo "      ✅ Comments cleaned"
-
-	@echo "   🗑️  Removing junk posts..."
-	@ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)posts WHERE post_status='auto-draft' OR post_type='revision';" >/dev/null 2>&1 || true
-	@ddev exec wp db query "DELETE pm FROM $(DB_TABLE_PREFIX)postmeta pm LEFT JOIN $(DB_TABLE_PREFIX)posts wp ON pm.post_id = wp.ID WHERE wp.ID IS NULL;" >/dev/null 2>&1 || true
-	@ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)postmeta WHERE meta_key IN ('_edit_lock','_edit_last');" >/dev/null 2>&1 || true
-	@echo "      ✅ Posts & metadata cleaned"
-
-	@echo "✅ Database cleaned"
-
-# 5. Assets
-.PHONY: build-assets
-build-assets:
-	@echo "⚡ Building assets with Vite..."
-	@cd $(INSTALL_PATH)/content/themes/$(THEME_NAME) && \
-		npm install >/dev/null 2>&1 && \
-		npm run build >/dev/null 2>&1 && \
-		echo "   ✅ Assets built" || { echo "   ❌ ERROR building assets"; exit 1; }
-
-# 6. Git / Template Repo
-# Create a repo from the website for further use as template
-.PHONY: create-repo
-create-repo:
+# export-site: Initialize a Git repo in TEMPLATE_DIR and push to GitHub.
+# - Requires: gh CLI authenticated, SSH agent forwarded to DDEV if needed.
+export-site:
 	@echo "📁 Initializing Git repository in $(TEMPLATE_DIR)..."
 	@cd $(TEMPLATE_DIR) && \
 	if [ ! -d .git ]; then \
@@ -246,8 +234,98 @@ create-repo:
 
 	@echo "✅ Done!"
 
+# import-site: Pull a template repo (TEMPLATE=<repo>) and import into this site.
+# Usage: make import-site TEMPLATE=portfolio
+import-site:
+ifndef TEMPLATE
+	$(error TEMPLATE is not set. Usage: make import-site TEMPLATE=portfolio)
+endif
+
+	@echo "🔧 Cloning template: $(TEMPLATE)"
+	@if git clone --depth 1 git@$(GIT_BASE)/$(TEMPLATE).git $(TEMPLATE) >/dev/null 2>&1; then \
+		echo "   ✅ Template cloned"; \
+	else \
+		echo "   ❌ ERROR: Failed to clone repo $(TEMPLATE)"; \
+		exit 1; \
+	fi
+
+	@echo "🧩 Copying content into WordPress..."
+	@rm -rf $(INSTALL_PATH)/content
+	@cp -R $(TEMPLATE)/content $(INSTALL_PATH)/ >/dev/null 2>&1 && \
+		echo "   ✅ Content copied" || { echo "   ❌ ERROR copying content"; exit 1; }
+
+	@echo "🔁 Importing database into $(DB_NAME)..."
+	@ddev exec mysql -u $(DB_USER) -p$(DB_PASSWORD) -h $(DB_HOST) $(DB_NAME) < $(TEMPLATE)/sql.sql >/dev/null 2>&1 && \
+		echo "   ✅ Database imported" || { echo "   ❌ ERROR importing database"; exit 1; }
+
+	@echo "🔧 Replacing placeholder URLs..."
+	@ddev exec wp search-replace '__SITEURL__' '$(WP_HOME)' --all-tables >/dev/null 2>&1 && \
+		echo "   ✅ URLs updated" || { echo "   ❌ ERROR updating URLs"; exit 1; }
+
+	@echo "🧹 Flushing caches..."
+	@ddev exec wp cache flush >/dev/null 2>&1 && \
+		echo "   ✅ Cache flushed"
+
+	@echo "🔗 Flushing permalinks..."
+	@ddev exec wp rewrite flush --hard >/dev/null 2>&1 && \
+		echo "   ✅ Permalinks flushed"
+
+	@echo "🧼 Cleaning up temporary files..."
+	@rm -rf $(TEMPLATE)
+	@find $(INSTALL_PATH) -name 'Zone.Identifier' -type f -delete
+	@echo "   ✅ Cleanup complete"
+
+	@echo "✅ Site imported and ready at: $(WP_HOME)"
+
+# ----------------------------------------------------------------------------
+# 4. Database Utilities
+# ----------------------------------------------------------------------------
+# clean-db: Remove transients, spam/trash comments, orphaned meta, auto-drafts,
+#           and revisions to produce a cleaner export.
+.PHONY: clean-db
+clean-db:
+	@echo "🧹 Cleaning database before export..."
+
+	@echo "   🗑️  Deleting transients..."
+	@ddev exec wp transient delete --all >/dev/null 2>&1 || true
+	@ddev exec wp option delete _site_transient_update_core >/dev/null 2>&1 || true
+	@ddev exec wp option delete _site_transient_update_plugins >/dev/null 2>&1 || true
+	@ddev exec wp option delete _site_transient_update_themes >/dev/null 2>&1 || true
+	@ddev exec wp option delete user_count >/dev/null 2>&1 || true
+	@ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)options WHERE option_name LIKE '_transient_%' OR option_name LIKE '_site_transient_%';" >/dev/null 2>&1 || true
+	@echo "      ✅ Transients cleaned"
+
+	@echo "   🗑️  Removing junk comments..."
+	@ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)comments WHERE comment_approved IN ('spam','trash');" >/dev/null 2>&1 || true
+	@ddev exec wp db query "DELETE cm FROM $(DB_TABLE_PREFIX)commentmeta cm LEFT JOIN $(DB_TABLE_PREFIX)comments wc ON cm.comment_id = wc.comment_ID WHERE wc.comment_ID IS NULL;" >/dev/null 2>&1 || true
+	@echo "      ✅ Comments cleaned"
+
+	@echo "   🗑️  Removing junk posts..."
+	@ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)posts WHERE post_status='auto-draft' OR post_type='revision';" >/dev/null 2>&1 || true
+	@ddev exec wp db query "DELETE pm FROM $(DB_TABLE_PREFIX)postmeta pm LEFT JOIN $(DB_TABLE_PREFIX)posts wp ON pm.post_id = wp.ID WHERE wp.ID IS NULL;" >/dev/null 2>&1 || true
+	@ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)postmeta WHERE meta_key IN ('_edit_lock','_edit_last');" >/dev/null 2>&1 || true
+	@echo "      ✅ Posts & metadata cleaned"
+
+	@echo "✅ Database cleaned"
+
+# ----------------------------------------------------------------------------
+# 5. Assets
+# ----------------------------------------------------------------------------
+.PHONY: build-assets
+# build-assets: Install npm deps and run the theme build via npm (Vite).
+build-assets:
+	@echo "⚡ Building assets with Vite..."
+	@cd $(INSTALL_PATH)/content/themes/$(THEME_NAME) && \
+		npm install >/dev/null 2>&1 && \
+		npm run build >/dev/null 2>&1 && \
+		echo "   ✅ Assets built" || { echo "   ❌ ERROR building assets"; exit 1; }
+
+
+# ----------------------------------------------------------------------------
 # 7. Themes & Plugins
+# ----------------------------------------------------------------------------
 .PHONY: install-themes install-themes-zip install-plugins install-git-plugins
+
 install-themes:
 	ddev exec wp theme install $(WP_THEMES) --activate
 	@echo "--- Initializing Theme Installation ---"
@@ -266,7 +344,7 @@ install-themes:
  	done
 	@echo "All specified WordPress themes installed and activated successfully!"
 
-install-themes-zip: 
+install-themes-zip:
 	@echo "--- Initializing Custom Theme (ZIP) Installation ---"
 	@for theme_zip in $(WP_THEMES_ZIP); do \
 		echo "  - Installing $$theme_zip..."; \
@@ -311,8 +389,11 @@ install-git-plugins:
 
 	@echo "--- GitHub Plugins Installation Complete ---"
 
+# ----------------------------------------------------------------------------
 # 8. Updates
+# ----------------------------------------------------------------------------
 .PHONY: update-wp update-plugins update-git update-all
+
 update-wp:
 	ddev exec wp core update
 
@@ -326,5 +407,4 @@ update-git:
 update-all: update-git update-wp
 	git submodule foreach git pull origin main
 	git submodule foreach git checkout main
-
 

@@ -3,38 +3,38 @@ import basicSsl from '@vitejs/plugin-basic-ssl'
 import dotenv from 'dotenv'
 import path from 'path'
 
-dotenv.config()
+dotenv.config({ path: path.resolve(process.cwd(), `.env.local`) });
 
 export default defineConfig(({ command }) => ({
     root: process.cwd(), // ✅ WSL-friendly root
-    base: command === 'serve' ? '' : '/app/content/themes/ntdstheme/public/',
+    base: command === 'serve' ? '' :  process.env.VITE_THEME ? `/app/content/themes/${process.env.VITE_THEME}/assets/` : '/dist/',
     publicDir: false,
     build: {
         assetsDir: '',
         emptyOutDir: true,
         manifest: true,
-        outDir: `../app/content/themes/ntdstheme/public`,
+        outDir: './app/content/themes/${process.env.VITE_THEME}/assets/',
         rollupOptions: {
             input: {
-                main: path.resolve(process.cwd(), 'src/main.js'),
+                main: path.resolve(process.cwd(), process.cwd(), process.env.VITE_ENTRY_POINT || 'src/main.js'),
             }
         },
     },
     server: {
-        host: '0.0.0.0',
-        port: 5181,
+        host: process.env.VITE_HOST || 'localhost',
+        port: parseInt(process.env.VITE_PORT) || 5181,
         strictPort: true,
         cors: {
-            origin: 'https://willy.ddev.site',
+            origin: process.env.WP_HOME,
             credentials: true,
         },
         hmr: {
-            host: 'localhost',
-            clientPort: 5181,
+            host: process.env.VITE_HOST || 'localhost',
+            clientPort: parseInt(process.env.VITE_PORT) || 5181,
             protocol: 'wss',
         },
-        https: true,
-        origin: 'https://localhost:5181'
+        https: process.env.VITE_PROTOCOL === 'https',
+        origin: `${process.env.VITE_PROTOCOL || 'http'}://${process.env.VITE_HOST || 'localhost'}:${process.env.VITE_PORT || 5173}`
     },
     plugins: [
         basicSsl(),

@@ -101,11 +101,11 @@ init:
 config:
 	$(call message_primary, "SETUP ENVIRONMENT")
 	@if [ ! -f .env ]; then \
-		if [ -f .env.example ]; then \
-			cp .env.example app/.env; \
-			echo ".env file created from .env.example"; \
+		if [ -f .env.staging ]; then \
+			cp .env.staging app/.env; \
+			echo "✅ .env file created from .env.example"; \
 		else \
-			echo "Error: .env.example file not found"; \
+			echo "❌  Error: .env.example file not found"; \
 			exit 1; \
 		fi; \
 	fi; \
@@ -179,6 +179,9 @@ create-template: clean-db
 # export-site: Initialize a Git repo in TEMPLATE_DIR and push to GitHub.
 # - Requires: gh CLI authenticated, SSH agent forwarded to DDEV if needed.
 export-site:
+ifndef TEMPLATE
+	$(error TEMPLATE is not set. Usage: make import-site TEMPLATE=portfolio)
+endif
 	@echo "📁 Initializing Git repository in $(TEMPLATE_DIR)..."
 	@cd $(TEMPLATE_DIR) && \
 	if [ ! -d .git ]; then \
@@ -208,20 +211,20 @@ export-site:
 	}
 	@echo "   ✅ SSH authentication successful"
 
-	@echo "🌐 Creating or pushing to GitHub repo: $(PROJECT_NAME)"
+	@echo "🌐 Creating or pushing to GitHub repo: $(TEMPLATE)"
 	@cd $(TEMPLATE_DIR) && { \
-		if ! gh repo view $(PROJECT_NAME) >/dev/null 2>&1; then \
-			if ! gh repo create $(PROJECT_NAME) --private --source=. --remote=origin --push; then \
-				echo "   ❌ ERROR: Failed to create repo $(PROJECT_NAME)"; \
+		if ! gh repo view $(TEMPLATE) >/dev/null 2>&1; then \
+			if ! gh repo create $(TEMPLATE) --private --source=. --remote=origin --push; then \
+				echo "   ❌ ERROR: Failed to create repo $(TEMPLATE)"; \
 				exit 1; \
 			else \
 				echo "   🚀 Repo created and pushed to GitHub"; \
 			fi; \
 		else \
 			if ! git remote get-url origin >/dev/null 2>&1; then \
-				git remote add origin git@$(GIT_BASE)/$(PROJECT_NAME).git; \
+				git remote add origin git@$(GIT_BASE)/$(TEMPLATE).git; \
 			else \
-				git remote set-url origin git@$(GIT_BASE)/$(PROJECT_NAME).git; \
+				git remote set-url origin git@$(GIT_BASE)/$(TEMPLATE).git; \
 			fi; \
 			if ! git push -u origin main; then \
 				echo "   ❌ ERROR: Failed to push to GitHub"; \
@@ -282,7 +285,9 @@ endif
 # ----------------------------------------------------------------------------
 # clean-db: Remove transients, spam/trash comments, orphaned meta, auto-drafts,
 #           and revisions to produce a cleaner export.
-.PHONY: clean-db
+# clone-local: create copy of the database
+.PHONY: clean-db clone-local
+
 clean-db:
 	@echo "🧹 Cleaning database before export..."
 
@@ -307,6 +312,10 @@ clean-db:
 	@echo "      ✅ Posts & metadata cleaned"
 
 	@echo "✅ Database cleaned"
+
+clone-local: clean-db
+	@echo "📥 Copying database to ./sql"
+	ddev wp db export ./sql/local-db.sql
 
 # ----------------------------------------------------------------------------
 # 5. Assets
@@ -408,3 +417,43 @@ update-all: update-git update-wp
 	git submodule foreach git pull origin main
 	git submodule foreach git checkout main
 
+# ----------------------------------------------------------------------------
+# 9. Deploy
+# ----------------------------------------------------------------------------
+.PHONY: sync-from-staging sync-to-staging
+
+# Sync from staging to local
+sync-from-staging:
+	@echo "📥 Syncing files from staging to local"
+	rsync -avz --delete $(SSH_REMOTE):subsites/staging.$(DOMAIN)/ ./app/
+	@echo "📥 Exporting staging database"
+	ssh $(SSH_REMOTE) "cd subsites/staging.$(DOMAIN) && wp db export /tmp/staging-db.sql --default-character-set=utf8mb4"
+	@echo "📥 Downloading staging database"
+	rsync -avz $(SSH_REMOTE):/tmp/staging-db.sql ./sql/staging-db.sql
+	@echo "🧹 Fixing collation for MariaDB compatibility"
+	sed -i 's/utf8mb4_0900_ai_ci/utf8mb4_unicode_ci/g' ./sql/staging-db.sql
+	@echo "🗄️  Importing database into local"
+	ddev wp db import ./sql/staging-db.sql
+	@echo "🧹 Cleaning up remote DB export"
+	ssh $(SSH_REMOTE) "rm /tmp/staging-db.sql"
+
+
+# Sync to staging
+sync-to-staging: clean-db config
+	@echo "📤 Syncing files from local to staging"
+	rsync -avz --delete ./app/ $(SSH_REMOTE):subsites/staging.$(DOMAIN)/
+	@echo "📤 Exporting local database"
+	ddev wp db export ./sql/local-to-staging.sql
+	@echo "📤 Uploading database to staging"
+	rsync -avz ./sql/local-to-staging.sql $(SSH_REMOTE):/tmp/local-to-staging.sql
+	@echo "🗄️  Importing database on staging"
+	ssh $(SSH_REMOTE) "cd subsites/staging.$(DOMAIN) && wp db import /tmp/local-to-staging.sql"
+	@echo "🔎 Running search-replace for staging domain"
+	ssh $(SSH_REMOTE) "cd subsites/staging.$(DOMAIN) && wp search-replace 'http://$(DOMAIN).test' 'https://staging.$(DOMAIN)' --skip-columns=guid"
+	@echo "🧹 Cleaning up uploaded DB export"
+	ssh $(SSH_REMOTE) "rm /tmp/local-to-staging.sql"
+
+# Compare files before syncing
+compare-with-staging:
+	@echo "🔍 Comparing local vs staging files"
+	rsync -avz --dry-run --delete ./app/ $(SSH_REMOTE):subsites/staging.$(DOMAIN)/

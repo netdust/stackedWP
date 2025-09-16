@@ -7,16 +7,16 @@ dotenv.config({ path: path.resolve(process.cwd(), `.env.local`) });
 
 export default defineConfig(({ command }) => ({
     root: process.cwd(), // ✅ WSL-friendly root
-    base: command === 'serve' ? '' :  process.env.VITE_THEME ? `/app/content/themes/${process.env.VITE_THEME}/assets/` : '/dist/',
+    base: command === 'serve' ? '' :  process.env.VITE_THEME ? `/content/themes/${process.env.VITE_THEME}/assets/dist/` : '/dist/',
     publicDir: false,
     build: {
         assetsDir: '',
         emptyOutDir: true,
         manifest: true,
-        outDir: './app/content/themes/${process.env.VITE_THEME}/assets/',
+        outDir: `./app/content/themes/${process.env.VITE_THEME}/assets/dist/`,
         rollupOptions: {
             input: {
-                main: path.resolve(process.cwd(), process.cwd(), process.env.VITE_ENTRY_POINT || 'src/main.js'),
+                main: path.resolve(process.cwd(), process.env.VITE_ENTRY_POINT || 'src/main.js'),
             }
         },
     },

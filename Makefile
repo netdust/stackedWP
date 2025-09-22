@@ -1,459 +1,190 @@
-# ============================================================================
-# WordPress + DDEV Project Makefile
-# ----------------------------------------------------------------------------
-# Purpose
-#   Automate common tasks for a DDEV-based WordPress project: initializing the
-#   environment, installing/configuring WordPress, exporting/importing a site
-#   template, cleaning the DB, building theme assets, managing Git/GitHub, and
-#   installing/updating themes/plugins (including GitHub-hosted ones).
-#
-# Prerequisites
-#   - DDEV (https://ddev.readthedocs.io/)
-#   - WP-CLI inside DDEV (ddev exec wp ...)
-#   - Composer (used via ddev exec composer)
-#   - Node.js + npm for building assets (inside theme directory)
-#   - Git and, if using GitHub operations, the GitHub CLI (gh) and SSH auth
-#
-# Quick start
-#   1) Configure env:  make init
-#   2) Install WP:     make install-wp
-#   3) Configure WP:   make config-wp
-#   4) Themes/plugins: make install-themes install-plugins (and/or install-git-plugins)
-#
-# Useful targets
-#   - export-site:  Export sanitized content + DB to TEMPLATE_DIR for reuse
-#   - import-site:  Import a template repo into this instance (TEMPLATE=repo)
-#   - clean-db:     Remove transients, junk posts/comments, etc. before export
-#   - build-assets: Build frontend assets via npm in your theme directory
-#   - create-repo:  Initialize/push export folder to new/existing GitHub repo
-#   - update-*:     Update WP core, plugins, and git submodules
-#
-# Notes
-#   - Environment variables are primarily read from .env.local (if present).
-#   - Some defaults are set below as fallbacks.
-#   - This Makefile uses ddev exec to run commands inside the container.
-# ============================================================================
+# WordPress Bedrock Development Makefile
+# Simple, powerful workflow for small teams
 
-# ----------------------------------------------------------------------------
-# 1. Environment & Defaults
-# ----------------------------------------------------------------------------
-# Load environment variables from .env.local when present. We expose variables
-# by exporting all keys found in .env.local (ignoring comments and empty lines).
-# Some variables (with quotes) are stripped for safety.
-ifeq ($(wildcard .env.local),.env.local)
-    include .env.local
-    export $(shell sed 's/^#.*//g' .env.local | sed '/^$$/d' | cut -d'=' -f1)
-    WP_BLOGNAME := $(strip $(subst ",,$(WP_BLOGNAME)))
-    WP_BLOGDESCRIPTION := $(strip $(subst ",,$(WP_BLOGDESCRIPTION)))
-    GITHUB_PLUGINS_REPOS := $(strip $(subst ",,$(GITHUB_PLUGINS_REPOS)))
-endif
+# Configuration - Update these values
+PROJECT_NAME := your-project
+STAGING_HOST := ploi-staging
+STAGING_PATH := /home/ploi/$(PROJECT_NAME).be
+PRODUCTION_HOST := ploi-production
+PRODUCTION_PATH := /home/ploi/$(PROJECT_NAME).com
+TEMPLATE_GITHUB := your-github-username
 
-# Default fallbacks if not provided via .env.local
-# PROJECT_NAME must typically come from .ddev/config.yaml or your env
-WP_HOME ?= https://$(PROJECT_NAME).ddev.site
-WP_SITEURL ?= $(WP_HOME)/wp
-DB_HOST ?= db
-DB_NAME ?= db
-DB_USER ?= db
-DB_PASSWORD ?= db
-DB_TABLE_PREFIX ?= ntdst_
-TEMPLATE_DIR ?= export
+# Colors
+RED := \033[31m
+GREEN := \033[32m
+YELLOW := \033[33m
+BLUE := \033[34m
+RESET := \033[0m
 
-# Expected additional envs (commonly defined in .env.local):
-# - INSTALL_PATH:       WP docroot inside container (e.g., app or .)
-# - THEME_NAME:         Active theme folder name under content/themes/
-# - WP_VERSION:         Target WP version for download (e.g., 6.5.5)
-# - ADMIN_USER/PASS/EMAIL: WP admin credentials for install
-# - WP_WPLANG, WP_TIMEZONE: WP locale/timezone (e.g., en_US, Europe/Paris)
-# - WP_THEMES:          Space-separated list of themes to install from wp.org
-# - WP_THEMES_DEST_DIR: Absolute path to wp-content/themes (inside container)
-# - WP_THEMES_ZIP:      Space-separated list of zip URLs/paths for custom themes
-# - WP_PLUGINS:         Space-separated list of plugins to install from wp.org
-# - WP_PLUGINS_DEST_DIR: Absolute path to wp-content/plugins (inside container)
-# - GITHUB_PLUGINS_REPOS: Space-separated git+ssh repo URLs for plugins
-# - GIT_BASE:           e.g., github.com:<org> (used by gh and git remote URLs)
-# - PROJECT_NAME:       Used when creating/viewing GitHub repos
+.PHONY: help setup start work save deploy release
 
-# ----------------------------------------------------------------------------
-# 2. Environment & WordPress Setup
-# ----------------------------------------------------------------------------
-.PHONY: init config install-wp config-wp
+help: ## Show available commands
+	@echo "$(BLUE)WordPress Bedrock Commands$(RESET)"
+	@echo "Current: $(git branch --show-current 2>/dev/null || echo 'no git') | DDEV: $(ddev describe -j 2>/dev/null | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || echo 'stopped')"
+	@echo ""
+	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ { printf "  $(GREEN)%-15s$(RESET) %s\n", $1, $2 }' $(MAKEFILE_LIST)
+	@echo ""
+	@echo "$(YELLOW)Typical workflow:$(RESET) work → save → deploy → release"
 
-# init: Configure DDEV, restart environment, install PHP deps, and download WP.
-init:
-	echo "⚙️  Configuring server..."
-	ddev config
-	ddev config --webserver-type apache-fpm
-	ddev restart
-	ddev exec composer install
+# === SETUP ===
+setup: ## Initial project setup
+	@echo "$(BLUE)Setting up project...$(RESET)"
+	@if [ ! -f .env ]; then cp .env.example .env; echo "$(YELLOW)Created .env - configure it$(RESET)"; fi
+	@composer install
+	@ddev config --project-type=wordpress --project-name=$(PROJECT_NAME)
+	@ddev start && ddev composer install
+	@git checkout staging 2>/dev/null || git checkout -b staging
+	@mkdir -p backups
+	@echo "$(GREEN)Setup complete! Configure .env and Makefile variables$(RESET)"
 
+start: ## Start development environment
+	@ddev start
+	@echo "$(GREEN)Development server started$(RESET)"
+	@ddev describe
 
-	echo "📥 Downloading WordPress..."
-	ddev exec wp core download --force --version=$(WP_VERSION)
+# === DAILY WORKFLOW ===
+work: ## Start working (pull staging branch)
+	@echo "$(BLUE)Starting work session...$(RESET)"
+	@ddev start 2>/dev/null || true
+	@git checkout staging && git pull origin staging 2>/dev/null || true
+	@echo "$(GREEN)Ready to work on staging branch$(RESET)"
 
-	@echo "🧹 Cleaning up wp folder"
-	ddev exec rm -f $(INSTALL_PATH)/wp/readme.html $(INSTALL_PATH)/wp/license.txt
-	ddev exec rm -rf $(INSTALL_PATH)/wp/wp-content
+save: ## Commit current work
+	@git add .
+	@read -p "Commit message: " msg && git commit -m "$$msg"
+	@echo "$(GREEN)Work saved$(RESET)"
 
-# config: Ensure an environment file exists.
-# NOTE: This copies .env.example to app/.env if .env is missing.
-#       Verify paths (.env vs .env.local) match your convention.
-config:
-	$(call message_primary, "SETUP ENVIRONMENT")
-	@if [ ! -f .env ]; then \
-		if [ -f .env.staging ]; then \
-			cp .env.staging app/.env; \
-			echo "✅ .env file created from .env.example"; \
-		else \
-			echo "❌  Error: .env.example file not found"; \
-			exit 1; \
-		fi; \
-	fi; \
-
-# install-wp: Create DB if needed and perform WP installation with provided vars.
-install-wp:
-	@echo "Running install-wp..."
-	ddev exec wp db check >/dev/null 2>&1 || ddev exec wp db create
-	@echo "INSTALL WP"
-	ddev exec wp core install \
-		--url='$(WP_HOME)' \
-		--title='$(WP_BLOGNAME)' \
-		--admin_user='$(ADMIN_USER)' \
-		--admin_password='$(ADMIN_PASS)' \
-		--admin_email='$(ADMIN_EMAIL)' \
-		--skip-plugins=hello \
-		--skip-themes=twentyfifteen,twentysixteen,twentyseventeen,twentynineteen,twentytwenty
-
-	@echo "WordPress installed!"
-
-# config-wp: Apply general settings, create a Home page, set permalinks, etc.
-config-wp:
-	@echo "Configuring WordPress General Settings..."
-
-
-	ddev exec wp option update blogname '$(WP_BLOGNAME)'
-	ddev exec wp option update blogdescription '$(WP_BLOGDESCRIPTION)'
-	ddev exec wp option update WPLANG '$(WP_WPLANG)'
-	ddev exec wp option update timezone_string '$(WP_TIMEZONE)'
-	ddev exec wp option update date_format 'd/m/Y'
-	ddev exec wp option update time_format 'H:i'
-
-	ddev exec wp post create --post_type=page --post_title="Home" --post_status=publish --allow-root
-	ddev exec wp option update show_on_front 'page' --allow-root
-	ddev exec wp option update page_on_front 5 --allow-root
-
-	ddev exec wp option update default_comment_status 'closed' --allow-root
-
-	$(call message_primary, "PERMALINKS")
-	ddev exec wp option get permalink_structure
-	ddev exec wp option update permalink_structure '/%postname%'
-	ddev exec wp rewrite flush --hard
-
-	ddev exec wp widget reset --all --allow-root
-
-	@echo "WordPress Settings Applied!"
-
-# ----------------------------------------------------------------------------
-# 3. Site Import / Export
-# ----------------------------------------------------------------------------
-.PHONY: create-template export-site import-site
-# create-template: Clean DB then export content and SQL into TEMPLATE_DIR.
-create-template: clean-db
-	@echo "📦 Exporting site as template"
-
-	@echo "📁 Saving cleaned export to $(TEMPLATE_DIR)..."
-	@mkdir -p $(TEMPLATE_DIR)
-	@cp -R $(INSTALL_PATH)/content $(TEMPLATE_DIR)/ >/dev/null 2>&1 && \
-		echo "   ✅ Content copied" || { echo "   ❌ ERROR copying content"; exit 1; }
-
-	@echo "💾 Exporting database..."
-	@ddev exec wp db export $(TEMPLATE_DIR)/sql.sql >/dev/null 2>&1 && \
-		echo "   ✅ Database exported" || { echo "   ❌ ERROR exporting database"; exit 1; }
-
-	@echo "🔧 Replacing site URL with placeholder..."
-	@sed -i "s|$(WP_HOME)|__SITEURL__|g" $(TEMPLATE_DIR)/sql.sql && \
-		echo "   ✅ URL replaced" || { echo "   ❌ ERROR updating SQL file"; exit 1; }
-
-	@echo "✅ Export complete: $(TEMPLATE_DIR)"
-
-# export-site: Initialize a Git repo in TEMPLATE_DIR and push to GitHub.
-# - Requires: gh CLI authenticated, SSH agent forwarded to DDEV if needed.
-export-site:
-ifndef TEMPLATE
-	$(error TEMPLATE is not set. Usage: make import-site TEMPLATE=portfolio)
-endif
-	@echo "📁 Initializing Git repository in $(TEMPLATE_DIR)..."
-	@cd $(TEMPLATE_DIR) && \
-	if [ ! -d .git ]; then \
-		git init -b main >/dev/null 2>&1 && \
-		git add . && \
-		git commit -m "Initial commit of WordPress site export" >/dev/null 2>&1 && \
-		echo "   ✅ Repo initialized"; \
+deploy: ## Deploy to staging server
+	@BRANCH=$(git branch --show-current); \
+	echo "$(BLUE)Deploying $BRANCH...$(RESET)"; \
+	git push origin $BRANCH; \
+	if ssh $(STAGING_HOST) "cd $(STAGING_PATH) && git fetch && git checkout $BRANCH && git pull origin $BRANCH && composer install --no-dev && wp cache flush --path=web/wp"; then \
+		echo "$(GREEN)✓ Deployed successfully$(RESET)"; \
+		make verify; \
 	else \
-		if ! git diff-index --quiet HEAD -- || [ "$$(git rev-list --all --count)" -eq 0 ]; then \
-			git add .; \
-			if ! git diff-index --quiet HEAD --; then \
-				git commit -m "Update WordPress site export" >/dev/null 2>&1 && \
-				echo "   ✨ Changes committed"; \
-			elif [ "$$(git rev-list --all --count)" -eq 0 ]; then \
-				git commit --allow-empty -m "Initial empty commit for export" >/dev/null 2>&1 && \
-				echo "   📝 Empty initial commit created"; \
-			fi; \
-		else \
-			echo "   ✔️ No changes to commit"; \
-		fi; \
+		echo "$(RED)✗ Deploy failed$(RESET)"; exit 1; \
 	fi
 
-	@echo "🔑 Authenticating with DDEV SSH Agent..."
-	@ddev auth ssh >/dev/null 2>&1 || { \
-		echo "   ❌ ERROR: ddev auth ssh failed."; \
-		exit 1; \
-	}
-	@echo "   ✅ SSH authentication successful"
-
-	@echo "🌐 Creating or pushing to GitHub repo: $(TEMPLATE)"
-	@cd $(TEMPLATE_DIR) && { \
-		if ! gh repo view $(TEMPLATE) >/dev/null 2>&1; then \
-			if ! gh repo create $(TEMPLATE) --private --source=. --remote=origin --push; then \
-				echo "   ❌ ERROR: Failed to create repo $(TEMPLATE)"; \
-				exit 1; \
-			else \
-				echo "   🚀 Repo created and pushed to GitHub"; \
-			fi; \
-		else \
-			if ! git remote get-url origin >/dev/null 2>&1; then \
-				git remote add origin git@$(GIT_BASE)/$(TEMPLATE).git; \
-			else \
-				git remote set-url origin git@$(GIT_BASE)/$(TEMPLATE).git; \
-			fi; \
-			if ! git push -u origin main; then \
-				echo "   ❌ ERROR: Failed to push to GitHub"; \
-				exit 1; \
-			else \
-				echo "   ⬆️ Changes pushed to GitHub"; \
-			fi; \
-		fi; \
-	}
-
-	@echo "✅ Done!"
-
-# import-site: Pull a template repo (TEMPLATE=<repo>) and import into this site.
-# Usage: make import-site TEMPLATE=portfolio
-import-site:
-ifndef TEMPLATE
-	$(error TEMPLATE is not set. Usage: make import-site TEMPLATE=portfolio)
-endif
-
-	@echo "🔧 Cloning template: $(TEMPLATE)"
-	@if git clone --depth 1 git@$(GIT_BASE)/$(TEMPLATE).git $(TEMPLATE) >/dev/null 2>&1; then \
-		echo "   ✅ Template cloned"; \
-	else \
-		echo "   ❌ ERROR: Failed to clone repo $(TEMPLATE)"; \
-		exit 1; \
+release: ## Release staging to main (production)
+	@echo "$(RED)Release staging to main?$(RESET)"; \
+	read -p "Continue? (y/N): " confirm; \
+	if [ "$confirm" = "y" ]; then \
+		git checkout main && git pull origin main 2>/dev/null || true; \
+		git merge staging && git push origin main; \
+		git checkout staging; \
+		echo "$(GREEN)✓ Released to main$(RESET)"; \
 	fi
 
-	@echo "🧩 Copying content into WordPress..."
-	@rm -rf $(INSTALL_PATH)/content
-	@cp -R $(TEMPLATE)/content $(INSTALL_PATH)/ >/dev/null 2>&1 && \
-		echo "   ✅ Content copied" || { echo "   ❌ ERROR copying content"; exit 1; }
-
-	@echo "🔁 Importing database into $(DB_NAME)..."
-	@ddev exec mysql -u $(DB_USER) -p$(DB_PASSWORD) -h $(DB_HOST) $(DB_NAME) < $(TEMPLATE)/sql.sql >/dev/null 2>&1 && \
-		echo "   ✅ Database imported" || { echo "   ❌ ERROR importing database"; exit 1; }
-
-	@echo "🔧 Replacing placeholder URLs..."
-	@ddev exec wp search-replace '__SITEURL__' '$(WP_HOME)' --all-tables >/dev/null 2>&1 && \
-		echo "   ✅ URLs updated" || { echo "   ❌ ERROR updating URLs"; exit 1; }
-
-	@echo "🧹 Flushing caches..."
-	@ddev exec wp cache flush >/dev/null 2>&1 && \
-		echo "   ✅ Cache flushed"
-
-	@echo "🔗 Flushing permalinks..."
-	@ddev exec wp rewrite flush --hard >/dev/null 2>&1 && \
-		echo "   ✅ Permalinks flushed"
-
-	@echo "🧼 Cleaning up temporary files..."
-	@rm -rf $(TEMPLATE)
-	@find $(INSTALL_PATH) -name 'Zone.Identifier' -type f -delete
-	@echo "   ✅ Cleanup complete"
-
-	@echo "✅ Site imported and ready at: $(WP_HOME)"
-
-# ----------------------------------------------------------------------------
-# 4. Database Utilities
-# ----------------------------------------------------------------------------
-# clean-db: Remove transients, spam/trash comments, orphaned meta, auto-drafts,
-#           and revisions to produce a cleaner export.
-# clone-local: create copy of the database
-.PHONY: clean-db clone-local
-
-clean-db:
-	@echo "🧹 Cleaning database before export..."
-
-	@echo "   🗑️  Deleting transients..."
-	@ddev exec wp transient delete --all >/dev/null 2>&1 || true
-	@ddev exec wp option delete _site_transient_update_core >/dev/null 2>&1 || true
-	@ddev exec wp option delete _site_transient_update_plugins >/dev/null 2>&1 || true
-	@ddev exec wp option delete _site_transient_update_themes >/dev/null 2>&1 || true
-	@ddev exec wp option delete user_count >/dev/null 2>&1 || true
-	@ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)options WHERE option_name LIKE '_transient_%' OR option_name LIKE '_site_transient_%';" >/dev/null 2>&1 || true
-	@echo "      ✅ Transients cleaned"
-
-	@echo "   🗑️  Removing junk comments..."
-	@ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)comments WHERE comment_approved IN ('spam','trash');" >/dev/null 2>&1 || true
-	@ddev exec wp db query "DELETE cm FROM $(DB_TABLE_PREFIX)commentmeta cm LEFT JOIN $(DB_TABLE_PREFIX)comments wc ON cm.comment_id = wc.comment_ID WHERE wc.comment_ID IS NULL;" >/dev/null 2>&1 || true
-	@echo "      ✅ Comments cleaned"
-
-	@echo "   🗑️  Removing junk posts..."
-	@ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)posts WHERE post_status='auto-draft' OR post_type='revision';" >/dev/null 2>&1 || true
-	@ddev exec wp db query "DELETE pm FROM $(DB_TABLE_PREFIX)postmeta pm LEFT JOIN $(DB_TABLE_PREFIX)posts wp ON pm.post_id = wp.ID WHERE wp.ID IS NULL;" >/dev/null 2>&1 || true
-	@ddev exec wp db query "DELETE FROM $(DB_TABLE_PREFIX)postmeta WHERE meta_key IN ('_edit_lock','_edit_last');" >/dev/null 2>&1 || true
-	@echo "      ✅ Posts & metadata cleaned"
-
-	@echo "✅ Database cleaned"
-
-clone-local: clean-db
-	@echo "📥 Copying database to ./sql"
-	ddev wp db export ./sql/local-db.sql
-
-# ----------------------------------------------------------------------------
-# 5. Assets
-# ----------------------------------------------------------------------------
-.PHONY: build-assets
-# build-assets: Install npm deps and run the theme build via npm (Vite).
-build-assets:
-	@echo "⚡ Building assets with Vite..."
-	@cd $(INSTALL_PATH)/content/themes/$(THEME_NAME) && \
-		npm install >/dev/null 2>&1 && \
-		npm run build >/dev/null 2>&1 && \
-		echo "   ✅ Assets built" || { echo "   ❌ ERROR building assets"; exit 1; }
-
-
-# ----------------------------------------------------------------------------
-# 7. Themes & Plugins
-# ----------------------------------------------------------------------------
-.PHONY: install-themes install-themes-zip install-plugins install-git-plugins
-
-install-themes:
-	ddev exec wp theme install $(WP_THEMES) --activate
-	@echo "--- Initializing Theme Installation ---"
-	@echo "1. Preparing target theme directory: $(WP_THEMES_DEST_DIR)..."
-	ddev exec sudo chown -R www-data:www-data $(WP_THEMES_DEST_DIR) || { echo "ERROR: Failed to change ownership"; exit 1; }
-	ddev exec sudo chmod -R ug+rwX,o+rX $(WP_THEMES_DEST_DIR) || { echo "ERROR: Failed to set permissions"; exit 1; }
-
-	@echo "2. Installing WordPress themes..."
-	@for theme in $(WP_THEMES); do \
- 		echo "  - Installing $$theme..."; \
- 		ddev exec wp theme install $$theme --activate --allow-root; \
- 		if [ $$? -ne 0 ]; then \
- 			echo "    Error: Failed to install and activate $$theme."; \
- 			exit 1; \
- 		fi; \
- 	done
-	@echo "All specified WordPress themes installed and activated successfully!"
-
-install-themes-zip:
-	@echo "--- Initializing Custom Theme (ZIP) Installation ---"
-	@for theme_zip in $(WP_THEMES_ZIP); do \
-		echo "  - Installing $$theme_zip..."; \
-		ddev wp theme install $$theme_zip --activate --allow-root; \
-		if [ $$? -ne 0 ]; then \
-			echo "    Error: Failed to install and activate $$theme_zip."; \
-			exit 1; \
+production: ## Deploy main branch to production server
+	@echo "$(RED)DEPLOY TO PRODUCTION?$(RESET)"; \
+	echo "$(YELLOW)This will deploy main branch to live site$(RESET)"; \
+	read -p "Are you absolutely sure? (y/N): " confirm; \
+	if [ "$confirm" = "y" ]; then \
+		git checkout main && git pull origin main; \
+		if ssh $(PRODUCTION_HOST) "cd $(PRODUCTION_PATH) && git fetch && git checkout main && git pull origin main && composer install --no-dev --optimize-autoloader && wp cache flush --path=web/wp"; then \
+			echo "$(GREEN)✓ PRODUCTION DEPLOYED$(RESET)"; \
+			REMOTE=$(ssh $(PRODUCTION_HOST) "cd $(PRODUCTION_PATH) && git rev-parse HEAD"); \
+			echo "$(GREEN)Production commit: $REMOTE$(RESET)"; \
+		else \
+			echo "$(RED)✗ PRODUCTION DEPLOY FAILED$(RESET)"; exit 1; \
 		fi; \
-	done
-	@echo "All specified custom WordPress themes installed and activated successfully!"
+		git checkout staging; \
+	else \
+		echo "$(YELLOW)Production deploy cancelled$(RESET)"; \
+	fi
 
-install-plugins:
-	@echo "--- Initializing Plugin Installation ---"
-	@for plugin in $(WP_PLUGINS); do \
- 		echo "  - Installing $$plugin..."; \
- 		ddev wp plugin install $$plugin --activate --skip-plugins --allow-root; \
- 		if [ $$? -ne 0 ]; then \
- 			echo "    Error: Failed to install and activate $$plugin."; \
- 			exit 1; \
- 		fi; \
- 	done
-	@echo "All specified WordPress plugins installed and activated successfully!"
+# === FEATURE BRANCHES (when needed) ===
+feature: ## Create feature branch (make feature name=my-feature)
+	@if [ -z "$(name)" ]; then echo "$(RED)Usage: make feature name=my-feature$(RESET)"; exit 1; fi
+	@git checkout staging && git pull origin staging
+	@git checkout -b feature/$(name)
+	@echo "$(GREEN)Created feature/$(name)$(RESET)"
 
-install-git-plugins:
-	@echo "--- Initializing GitHub Plugin Installation ---"
-	@echo "1. Ensuring DDEV SSH Agent is Authenticated..."
-	@ddev auth ssh || { echo "ERROR: ddev auth ssh failed. Ensure your SSH agent is running and keys are added (e.g., 'eval \"\$$\(ssh-agent -s\)\"; ssh-add ~/.ssh/id_ed25519')"; exit 1; }
+finish: ## Merge current feature to staging
+	@BRANCH=$$(git branch --show-current); \
+	if [[ $$BRANCH != feature/* ]]; then echo "$(RED)Not on feature branch$(RESET)"; exit 1; fi; \
+	git checkout staging && git pull origin staging && git merge $$BRANCH && git push origin staging; \
+	git branch -d $$BRANCH; \
+	echo "$(GREEN)✓ Feature merged to staging$(RESET)"
 
-	@echo "2. Preparing plugin directory $(WP_PLUGINS_DEST_DIR) on host..."
-	@mkdir -p $(WP_PLUGINS_DEST_DIR)
-	@sudo chown -R $(USER):$(USER) $(WP_PLUGINS_DEST_DIR)
-	@chmod -R ug+rwX,o+rX $(WP_PLUGINS_DEST_DIR)
+switch: ## Switch branch (make switch name=branch-name)
+	@if [ -z "$(name)" ]; then git branch -a; echo "$(RED)Usage: make switch name=branch$(RESET)"; exit 1; fi
+	@git checkout $(name)
 
-	@echo "3. Cloning and Activating GitHub Plugins..."
-	@for repo_url in $(GITHUB_PLUGINS_REPOS); do \
-		repo_name=$$(basename $$repo_url .git); \
-		echo "  -> Processing $$repo_name from $$repo_url..."; \
-		ddev exec bash -c "git clone '$$repo_url' '$(WP_PLUGINS_DEST_DIR)/$$repo_name' || ( cd '$(WP_PLUGINS_DEST_DIR)/$$repo_name' && git pull )"; \
-		ddev exec wp plugin activate "$$repo_name/$$repo_name.php" || \
-		echo "WARNING: Could not activate $$repo_name. Maybe it's already active or the main file name is wrong."; \
-	done
+# === SYNC ===
+sync-down: ## Download files and database from staging
+	@echo "$(BLUE)Syncing from staging server...$(RESET)"
+	@rsync -avz --exclude='.git' --exclude='.ddev' --exclude='vendor' --exclude='node_modules' $(STAGING_HOST):$(STAGING_PATH)/web/app/uploads/ web/app/uploads/
+	@ssh $(STAGING_HOST) "cd $(STAGING_PATH) && wp db export --path=web/wp temp.sql"
+	@scp $(STAGING_HOST):$(STAGING_PATH)/temp.sql ./temp.sql
+	@ssh $(STAGING_HOST) "rm $(STAGING_PATH)/temp.sql"
+	@ddev import-db --src=temp.sql && rm temp.sql
+	@ddev wp search-replace "https://your-staging-domain.com" "https://$(PROJECT_NAME).ddev.site"
+	@echo "$(GREEN)✓ Sync complete$(RESET)"
 
-	@echo "--- GitHub Plugins Installation Complete ---"
+sync-up: ## Upload files to staging (careful!)
+	@echo "$(RED)Upload files to staging server?$(RESET)"; \
+	read -p "Continue? (y/N): " confirm; \
+	if [ "$confirm" = "y" ]; then \
+		rsync -avz --exclude='.git' --exclude='.ddev' --exclude='vendor' --exclude='node_modules' web/app/uploads/ $(STAGING_HOST):$(STAGING_PATH)/web/app/uploads/; \
+		echo "$(GREEN)✓ Files uploaded$(RESET)"; \
+	fi
 
-# ----------------------------------------------------------------------------
-# 8. Updates
-# ----------------------------------------------------------------------------
-.PHONY: update-wp update-plugins update-git update-all
+# === UTILITIES ===
+verify: ## Verify deployment worked
+	@EXPECTED=$(git rev-parse HEAD); \
+	REMOTE=$(ssh $(STAGING_HOST) "cd $(STAGING_PATH) && git rev-parse HEAD"); \
+	if [ "$EXPECTED" = "$REMOTE" ]; then \
+		echo "$(GREEN)✓ Deployment verified$(RESET)"; \
+	else \
+		echo "$(RED)✗ Deployment not synced$(RESET)"; \
+	fi
 
-update-wp:
-	ddev exec wp core update
+status: ## Show git and environment status
+	@echo "$(BLUE)Branch:$(RESET) $(git branch --show-current)"
+	@echo "$(BLUE)Status:$(RESET) $(git status --porcelain | wc -l | tr -d ' ') changes"
+	@ddev describe 2>/dev/null || echo "$(YELLOW)DDEV not running$(RESET)"
 
-update-plugins:
-	ddev exec wp plugin update --all
+ssh: ## SSH to staging server
+	@ssh $(STAGING_HOST)
 
-update-git:
-	git pull origin main
-	git submodule update --init
+ssh-production: ## SSH to production server
+	@ssh $(PRODUCTION_HOST)
 
-update-all: update-git update-wp
-	git submodule foreach git pull origin main
-	git submodule foreach git checkout main
+clear-cache: ## Clear all caches on production
+	@echo "$(BLUE)Clearing production caches...$(RESET)"
+	@ssh $(PRODUCTION_HOST) "cd $(PRODUCTION_PATH) && wp cache flush --path=web/wp && wp redis flush --path=web/wp && sudo nginx -s reload"
+	@echo "$(GREEN)✓ All caches cleared$(RESET)"
 
-# ----------------------------------------------------------------------------
-# 9. Deploy
-# ----------------------------------------------------------------------------
-.PHONY: sync-from-staging sync-to-staging
+# === UPDATES ===
+update: ## Update WordPress core and all plugins
+	@echo "$(BLUE)Updating WordPress and plugins...$(RESET)"
+	@composer update
+	@echo "$(GREEN)✓ WordPress and plugins updated$(RESET)"
+	@echo "$(YELLOW)Run 'make save' and 'make deploy' to deploy updates$(RESET)"
 
-# Sync from staging to local
-sync-from-staging:
-	@echo "📥 Syncing files from staging to local"
-	rsync -avz --delete $(SSH_REMOTE):subsites/staging.$(DOMAIN)/ ./app/
-	@echo "📥 Exporting staging database"
-	ssh $(SSH_REMOTE) "cd subsites/staging.$(DOMAIN) && wp db export /tmp/staging-db.sql --default-character-set=utf8mb4"
-	@echo "📥 Downloading staging database"
-	rsync -avz $(SSH_REMOTE):/tmp/staging-db.sql ./sql/staging-db.sql
-	@echo "🧹 Fixing collation for MariaDB compatibility"
-	sed -i 's/utf8mb4_0900_ai_ci/utf8mb4_unicode_ci/g' ./sql/staging-db.sql
-	@echo "🗄️  Importing database into local"
-	ddev wp db import ./sql/staging-db.sql
-	@echo "🧹 Cleaning up remote DB export"
-	ssh $(SSH_REMOTE) "rm /tmp/staging-db.sql"
+update-core: ## Update only WordPress core
+	@echo "$(BLUE)Updating WordPress core...$(RESET)"
+	@composer update roots/wordpress
+	@echo "$(GREEN)✓ WordPress core updated$(RESET)"
 
+update-plugins: ## Update only plugins
+	@echo "$(BLUE)Updating plugins...$(RESET)"
+	@composer update wpackagist-plugin/*
+	@echo "$(GREEN)✓ Plugins updated$(RESET)"
 
-# Sync to staging
-sync-to-staging: clean-db config
-	@echo "📤 Syncing files from local to staging"
-	rsync -avz --delete ./app/ $(SSH_REMOTE):subsites/staging.$(DOMAIN)/
-	@echo "📤 Exporting local database"
-	ddev wp db export ./sql/local-to-staging.sql
-	@echo "📤 Uploading database to staging"
-	rsync -avz ./sql/local-to-staging.sql $(SSH_REMOTE):/tmp/local-to-staging.sql
-	@echo "🗄️  Importing database on staging"
-	ssh $(SSH_REMOTE) "cd subsites/staging.$(DOMAIN) && wp db import /tmp/local-to-staging.sql"
-	@echo "🔎 Running search-replace for staging domain"
-	ssh $(SSH_REMOTE) "cd subsites/staging.$(DOMAIN) && wp search-replace 'http://$(DOMAIN).test' 'https://staging.$(DOMAIN)' --skip-columns=guid"
-	@echo "🧹 Cleaning up uploaded DB export"
-	ssh $(SSH_REMOTE) "rm /tmp/local-to-staging.sql"
+show-updates: ## Show available updates
+	@echo "$(BLUE)Checking for updates...$(RESET)"
+	@composer outdated
+	@echo ""
+	@echo "$(YELLOW)Use 'make update' to update all or 'make update-core' / 'make update-plugins'$(RESET)"
 
-# Compare files before syncing
-compare-with-staging:
-	@echo "🔍 Comparing local vs staging files"
-	rsync -avz --dry-run --delete ./app/ $(SSH_REMOTE):subsites/staging.$(DOMAIN)/
+logs: ## Show ddev logs
+	@ddev logs -f
+
+clean: ## Clean up environment
+	@ddev clean && composer dump-autoload
+	@echo "$(GREEN)✓ Cleaned up$(RESET)"
+
+stop: ## Stop development environment
+	@ddev stop

@@ -2,11 +2,6 @@
 /*
 !src/
 
-# Ignore framework directories everywhere
-**/wp/
-**/vendor/
-**/node_modules/
-
 # Ignore files starting with . or ~
 .*
 ~*
@@ -88,3 +83,4 @@ Thumbs.db
 !/app/.htaccess
 !/app/index.php
 !/app/wp-config.php
+

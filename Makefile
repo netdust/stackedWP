@@ -1,50 +1,34 @@
-# WordPress Development Makefile (Folder Agnostic)
+# WordPress Development Makefile
 # Simple, secure workflow for small teams
 #
 # DEPLOYMENT STRATEGY: Git bundles (no GitHub/remote repo required!)
 # WORKFLOW: setup → dev → save → deploy → ship
 #
-# Version: 3.0 - Folder Agnostic
-
+# Version: 3.0
 # ═══════════════════════════════════════════════════════════════════════════
 #                          PROJECT CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════
 
-PROJECT_NAME := # Configure
-STAGING_HOST := # Configure
-STAGING_PATH := # Configure
-STAGING_URL := # Configure
+PROJECT_NAME := fuse
+STAGING_HOST := combell-fuse-staging
+STAGING_PATH := /data/sites/web/fusepilatesbe/subsites/staging.fusepilates.be
+STAGING_URL := https://staging.fusepilates.be
 PRODUCTION_HOST := # Configure when ready
 PRODUCTION_PATH := # Configure when ready
 PRODUCTION_URL := # Configure when ready
 
 # ═══════════════════════════════════════════════════════════════════════════
-#                     FOLDER STRUCTURE (Customize for your setup)
+#                     FOLDER STRUCTURE
 # ═══════════════════════════════════════════════════════════════════════════
-
-# Project Type (affects deployment bundle strategy)
-# - bedrock: Bundles entire project root (composer.json rebuilds web/wp & vendor on remote)
-# - standard: Bundles only CONTENT_PATH (wp-content/) using git subtree split
-PROJECT_TYPE := bedrock
-
-# BEDROCK STRUCTURE (current)
-WEB_ROOT := web
-WP_CORE_PATH := $(WEB_ROOT)/wp
-CONTENT_PATH := $(WEB_ROOT)/app
+WEB_ROOT := app
+CONTENT_PATH := $(WEB_ROOT)/content
 UPLOADS_PATH := $(CONTENT_PATH)/uploads
 PLUGINS_PATH := $(CONTENT_PATH)/plugins
 THEMES_PATH := $(CONTENT_PATH)/themes
 MUPLUGINS_PATH := $(CONTENT_PATH)/mu-plugins
 
-# STANDARD: Uncomment these instead
-# PROJECT_TYPE := standard
-# WEB_ROOT := app
-# WP_CORE_PATH := $(WEB_ROOT)/wp
-# CONTENT_PATH := $(WEB_ROOT)/content
-# UPLOADS_PATH := $(CONTENT_PATH)/uploads
-# PLUGINS_PATH := $(CONTENT_PATH)/plugins
-# THEMES_PATH := $(CONTENT_PATH)/themes
-# MUPLUGINS_PATH := $(CONTENT_PATH)/mu-plugins
+# Remote server paths (no 'app/' prefix on remote)
+REMOTE_WP_PATH := wp
 
 # ═══════════════════════════════════════════════════════════════════════════
 #                          LOCAL DEVELOPMENT (DDEV)
@@ -52,7 +36,6 @@ MUPLUGINS_PATH := $(CONTENT_PATH)/mu-plugins
 
 LOCAL_URL := https://$(PROJECT_NAME).ddev.site
 ENV_FILE := .env
-ENV_EXAMPLE := .env.example
 
 # ═══════════════════════════════════════════════════════════════════════════
 #                          STORAGE & TEMPLATES
@@ -80,7 +63,7 @@ export PATH := $(PATH):/usr/bin:/bin
 .PHONY: help
 help: ## Show this help
 	@echo "$(BLUE)╔════════════════════════════════════════════════════╗$(RESET)"
-	@echo "$(BLUE)║  $(PROJECT_NAME) - WordPress Bedrock Development$(RESET)"
+	@echo "$(BLUE)║  $(PROJECT_NAME) - WordPress Bedrock Development	$(RESET)"
 	@echo "$(BLUE)╚════════════════════════════════════════════════════╝$(RESET)"
 	@echo ""
 	@echo "$(GREEN)Branch:$(RESET) $(shell git branch --show-current 2>/dev/null || echo 'none')"
@@ -142,7 +125,7 @@ setup: ## Complete local setup
 		echo "$(GREEN)✓ DDEV configured$(RESET)"; \
 	fi
 	@ddev start
-	@ddev composer install
+	@ddev composer install --working-dir=$(WEB_ROOT)
 	@$(MAKE) --no-print-directory _git-setup
 	@echo "$(GREEN)✅ Local setup complete!$(RESET)"
 	@echo "$(YELLOW)Next steps:$(RESET)"
@@ -164,13 +147,13 @@ setup-staging: ## Setup staging server with DB/files
 		sed -i.bak "s|$(LOCAL_URL)|$(STAGING_URL)|g" $(TEMP_DIR)/staging-init.sql && rm -f $(TEMP_DIR)/staging-init.sql.bak; \
 		echo "$(YELLOW)Pushing database to staging...$(RESET)"; \
 		scp $(TEMP_DIR)/staging-init.sql $(STAGING_HOST):$(TEMP_DIR)/; \
-		ssh $(STAGING_HOST) "cd $(STAGING_PATH) && wp db import $(TEMP_DIR)/staging-init.sql --path=$(WP_CORE_PATH) && rm $(TEMP_DIR)/staging-init.sql"; \
+		ssh $(STAGING_HOST) "cd $(STAGING_PATH) && wp db import $(TEMP_DIR)/staging-init.sql --path=$(REMOTE_WP_PATH) && rm $(TEMP_DIR)/staging-init.sql"; \
 		rm $(TEMP_DIR)/staging-init.sql; \
 		if [ -d "$(UPLOADS_PATH)" ]; then \
 			echo "$(YELLOW)Pushing uploads...$(RESET)"; \
-			rsync -avz $(UPLOADS_PATH)/ $(STAGING_HOST):$(STAGING_PATH)/$(UPLOADS_PATH)/; \
+			rsync -avz $(UPLOADS_PATH)/ $(STAGING_HOST):$(STAGING_PATH)/content/uploads/; \
 		fi; \
-		ssh $(STAGING_HOST) "cd $(STAGING_PATH) && wp cache flush --path=$(WP_CORE_PATH)"; \
+		ssh $(STAGING_HOST) "cd $(STAGING_PATH) && wp cache flush --path=$(REMOTE_WP_PATH)"; \
 		echo "$(GREEN)✅ Staging setup complete with DB and files!$(RESET)"; \
 	else \
 		echo "$(YELLOW)⚠️  Staging Git ready. Run from active DDEV to push DB/files$(RESET)"; \
@@ -459,7 +442,7 @@ sync-to-local: ## Pull DB & files from staging to local
 		exit 1; \
 	fi
 	@echo "$(YELLOW)Pulling database...$(RESET)"
-	@if ! ssh $(STAGING_HOST) "cd $(STAGING_PATH) && wp db export --path=$(WP_CORE_PATH) -" > $(TEMP_DIR)/staging.sql; then \
+	@if ! ssh $(STAGING_HOST) "cd $(STAGING_PATH) && wp db export --path=$(REMOTE_WP_PATH) -" > $(TEMP_DIR)/staging.sql; then \
 		echo "$(RED)❌ Failed to export staging database$(RESET)"; \
 		exit 1; \
 	fi
@@ -474,7 +457,7 @@ sync-to-local: ## Pull DB & files from staging to local
 		exit 1; \
 	fi
 	@echo "$(YELLOW)Pulling files...$(RESET)"
-	@if ! rsync -avz --delete $(STAGING_HOST):$(STAGING_PATH)/$(UPLOADS_PATH)/ $(UPLOADS_PATH)/; then \
+	@if ! rsync -avz --delete $(STAGING_HOST):$(STAGING_PATH)/content/uploads/ $(UPLOADS_PATH)/; then \
 		echo "$(RED)❌ Failed to sync files from staging$(RESET)"; \
 		exit 1; \
 	fi
@@ -488,7 +471,7 @@ sync-to-staging: ## Push DB & files from local to staging
 	@$(MAKE) --no-print-directory _confirm message="Continue sync to staging?"
 	@echo "$(YELLOW)Backing up staging...$(RESET)"
 	@mkdir -p $(BACKUP_DIR)
-	@if ! ssh $(STAGING_HOST) "cd $(STAGING_PATH) && wp db export --path=$(WP_CORE_PATH) -" > $(BACKUP_DIR)/staging-$$(date +%Y%m%d-%H%M%S).sql; then \
+	@if ! ssh $(STAGING_HOST) "cd $(STAGING_PATH) && wp db export --path=$(REMOTE_WP_PATH) -" > $(BACKUP_DIR)/staging-$$(date +%Y%m%d-%H%M%S).sql; then \
 		echo "$(RED)❌ Failed to backup staging database$(RESET)"; \
 		exit 1; \
 	fi
@@ -504,18 +487,18 @@ sync-to-staging: ## Push DB & files from local to staging
 		rm -f $(TEMP_DIR)/local.sql; \
 		exit 1; \
 	fi
-	@if ! ssh $(STAGING_HOST) "cd $(STAGING_PATH) && wp db import $(TEMP_DIR)/local.sql --path=$(WP_CORE_PATH) && rm $(TEMP_DIR)/local.sql"; then \
+	@if ! ssh $(STAGING_HOST) "cd $(STAGING_PATH) && wp db import $(TEMP_DIR)/local.sql --path=$(REMOTE_WP_PATH) && rm $(TEMP_DIR)/local.sql"; then \
 		echo "$(RED)❌ Failed to import database on staging$(RESET)"; \
 		rm -f $(TEMP_DIR)/local.sql; \
 		exit 1; \
 	fi
 	@rm -f $(TEMP_DIR)/local.sql
 	@echo "$(YELLOW)Pushing files...$(RESET)"
-	@if ! rsync -avz --delete $(UPLOADS_PATH)/ $(STAGING_HOST):$(STAGING_PATH)/$(UPLOADS_PATH)/; then \
+	@if ! rsync -avz --delete $(UPLOADS_PATH)/ $(STAGING_HOST):$(STAGING_PATH)/content/uploads/; then \
 		echo "$(RED)❌ Failed to sync files to staging$(RESET)"; \
 		exit 1; \
 	fi
-	@if ! ssh $(STAGING_HOST) "cd $(STAGING_PATH) && wp cache flush --path=$(WP_CORE_PATH)"; then \
+	@if ! ssh $(STAGING_HOST) "cd $(STAGING_PATH) && wp cache flush --path=$(REMOTE_WP_PATH)"; then \
 		echo "$(RED)❌ Failed to flush cache on staging$(RESET)"; \
 		exit 1; \
 	fi
@@ -788,7 +771,7 @@ rollback: ## Emergency rollback (staging or production)
 	ssh $$HOST "cd $$REMOTE_PATH && \
 		git reset --hard HEAD~1 && \
 		composer install --no-dev && \
-		wp cache flush --path=$(WP_CORE_PATH)" && \
+		wp cache flush --path=$(REMOTE_WP_PATH)" && \
 	echo "$(GREEN)✅ Rolled back successfully$(RESET)"
 
 # === OPTIONAL: REMOTE REPO WORKFLOW ===
@@ -802,7 +785,7 @@ rollback: ## Emergency rollback (staging or production)
 # 		git fetch origin && \
 # 		git reset --hard origin/$(shell git branch --show-current) && \
 # 		composer install --no-dev && \
-# 		wp cache flush --path=$(WP_CORE_PATH)"
+# 		wp cache flush --path=$(WP_REMOTE_PATH)"
 # 	@echo "$(GREEN)✅ Deployed via remote repo$(RESET)"
 
 # push: ## Push to remote repository
@@ -898,13 +881,13 @@ _safe-db-push:
 	@sed -i.bak "s|$(LOCAL_URL)|$(url)|g" $(file) && rm $(file).bak
 	@scp $(file) $(STAGING_HOST):$(TEMP_DIR)/db-import.sql
 	@ssh $(STAGING_HOST) "cd $(STAGING_PATH) && \
-		wp db import $(TEMP_DIR)/db-import.sql --path=$(WP_CORE_PATH) && \
+		wp db import $(TEMP_DIR)/db-import.sql --path=$(REMOTE_WP_PATH) && \
 		rm $(TEMP_DIR)/db-import.sql && \
-		wp cache flush --path=$(WP_CORE_PATH)"
+		wp cache flush --path=$(REMOTE_WP_PATH)"
 
 _safe-files-push:
 	@if [ -d "$(UPLOADS_PATH)" ]; then \
-		rsync -avz --delete $(UPLOADS_PATH)/ $(STAGING_HOST):$(STAGING_PATH)/$(UPLOADS_PATH)/ && \
+		rsync -avz --delete $(UPLOADS_PATH)/ $(STAGING_HOST):$(STAGING_PATH)/content/uploads/ && \
 		echo "$(GREEN)✅ Files pushed$(RESET)"; \
 	else \
 		echo "$(YELLOW)⚠️  No uploads directory$(RESET)"; \
@@ -915,7 +898,7 @@ _backup-staging:
 	@mkdir -p $(BACKUP_DIR)
 	@TIMESTAMP=$$(date +%Y%m%d-%H%M%S); \
 	ssh $(STAGING_HOST) "cd $(STAGING_PATH) && \
-		wp db export --path=$(WP_CORE_PATH) - | gzip" > $(BACKUP_DIR)/staging-$$TIMESTAMP.sql.gz && \
+		wp db export --path=$(REMOTE_WP_PATH) - | gzip" > $(BACKUP_DIR)/staging-$$TIMESTAMP.sql.gz && \
 	echo "$(GREEN)✅ Staging backed up: $(BACKUP_DIR)/staging-$$TIMESTAMP.sql.gz$(RESET)"
 
 _backup-production:
@@ -923,7 +906,7 @@ _backup-production:
 	@mkdir -p $(BACKUP_DIR)
 	@TIMESTAMP=$$(date +%Y%m%d-%H%M%S); \
 	if ! ssh $(PRODUCTION_HOST) "cd $(PRODUCTION_PATH) && \
-		wp db export --path=$(WP_CORE_PATH) - | gzip" > $(BACKUP_DIR)/production-$$TIMESTAMP.sql.gz; then \
+		wp db export --path=$(REMOTE_WP_PATH) - | gzip" > $(BACKUP_DIR)/production-$$TIMESTAMP.sql.gz; then \
 		echo "$(RED)❌ Failed to backup production database$(RESET)"; \
 		exit 1; \
 	fi; \
@@ -971,17 +954,23 @@ _create-bundle:
 	if [ "$(PROJECT_TYPE)" = "bedrock" ]; then \
 		echo "$(YELLOW)Creating bundle from entire project (Bedrock mode): $$COMMIT$(RESET)"; \
 		if ! git bundle create $(TEMP_DIR)/$$BUNDLE_NAME deploy-temp; then \
-			git checkout -f "$$CURRENT_BRANCH"; \
+			DEPLOY_COMMIT=$$(git rev-parse HEAD); \
+			git checkout "$$CURRENT_BRANCH"; \
+			git checkout $$DEPLOY_COMMIT -- $(PLUGINS_PATH)/ $(THEMES_PATH)/ 2>/dev/null || true; \
+			git reset HEAD $(PLUGINS_PATH)/ $(THEMES_PATH)/ 2>/dev/null; \
 			git branch -D deploy-temp 2>/dev/null || true; \
 			echo "$(RED)❌ Failed to create bundle$(RESET)"; \
 			exit 1; \
 		fi; \
 	else \
-		echo "$(YELLOW)Creating bundle from $(CONTENT_PATH)/ directory (Standard WordPress mode): $$COMMIT$(RESET)"; \
-		git subtree split --prefix=$(CONTENT_PATH) -b deploy-bundle-temp && \
+		echo "$(YELLOW)Creating bundle from $(WEB_ROOT)/ directory (Standard WordPress mode): $$COMMIT$(RESET)"; \
+		git subtree split --prefix=$(WEB_ROOT) -b deploy-bundle-temp && \
 		if ! git bundle create $(TEMP_DIR)/$$BUNDLE_NAME deploy-bundle-temp; then \
 			git branch -D deploy-bundle-temp 2>/dev/null || true; \
-			git checkout -f "$$CURRENT_BRANCH"; \
+			DEPLOY_COMMIT=$$(git rev-parse HEAD); \
+			git checkout "$$CURRENT_BRANCH"; \
+			git checkout $$DEPLOY_COMMIT -- $(PLUGINS_PATH)/ $(THEMES_PATH)/ 2>/dev/null || true; \
+			git reset HEAD $(PLUGINS_PATH)/ $(THEMES_PATH)/ 2>/dev/null; \
 			git branch -D deploy-temp 2>/dev/null || true; \
 			echo "$(RED)❌ Failed to create bundle$(RESET)"; \
 			exit 1; \
@@ -990,14 +979,20 @@ _create-bundle:
 	fi && \
 	echo "$(YELLOW)Verifying bundle integrity...$(RESET)"; \
 	if ! git bundle verify $(TEMP_DIR)/$$BUNDLE_NAME >/dev/null 2>&1; then \
+		DEPLOY_COMMIT=$$(git rev-parse HEAD); \
 		git checkout "$$CURRENT_BRANCH"; \
+		git checkout $$DEPLOY_COMMIT -- $(PLUGINS_PATH)/ $(THEMES_PATH)/ 2>/dev/null || true; \
+		git reset HEAD $(PLUGINS_PATH)/ $(THEMES_PATH)/ 2>/dev/null; \
 		git branch -D deploy-temp 2>/dev/null || true; \
 		echo "$(RED)❌ Bundle verification failed$(RESET)"; \
 		rm -f $(TEMP_DIR)/$$BUNDLE_NAME; \
 		exit 1; \
 	fi; \
 	echo "$(YELLOW)Cleaning up: switching back to $$CURRENT_BRANCH and removing deploy-temp branch$(RESET)"; \
-	git checkout -f "$$CURRENT_BRANCH" && \
+	DEPLOY_COMMIT=$$(git rev-parse HEAD) && \
+	git checkout "$$CURRENT_BRANCH" && \
+	git checkout $$DEPLOY_COMMIT -- $(PLUGINS_PATH)/ $(THEMES_PATH)/ 2>/dev/null || true && \
+	git reset HEAD $(PLUGINS_PATH)/ $(THEMES_PATH)/ 2>/dev/null && \
 	git branch -D deploy-temp && \
 	echo "$(GREEN)✅ Bundle created successfully$(RESET)"; \
 	echo "$$BUNDLE_NAME" > $(TEMP_DIR)/.bundle-name
@@ -1020,12 +1015,12 @@ _deploy-bundle:
 		if [ -f composer.json ]; then \
 			composer install --no-dev --optimize-autoloader; \
 		fi && \
-		if [ -d $(WP_CORE_PATH)/wp-content ]; then \
+		if [ -d $(REMOTE_WP_PATH)/wp-content ]; then \
 			echo 'Removing default wp-content...' && \
-			rm -rf $(WP_CORE_PATH)/wp-content; \
+			rm -rf $(REMOTE_WP_PATH)/wp-content; \
 		fi && \
-		if [ -d $(WP_CORE_PATH) ]; then \
-			wp cache flush --path=$(WP_CORE_PATH) 2>/dev/null || true; \
+		if [ -d $(REMOTE_WP_PATH) ]; then \
+			wp cache flush --path=$(REMOTE_WP_PATH) 2>/dev/null || true; \
 		fi && \
 		rm -f $$BUNDLE_NAME"; then \
 		echo "$(GREEN)✅ Deployed to $(env)$(RESET)"; \

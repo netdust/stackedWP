@@ -9,9 +9,9 @@
 # ═══════════════════════════════════════════════════════════════════════════
 
 PROJECT_NAME := fuse
-STAGING_HOST := combell-fuse-staging
-STAGING_PATH := /data/sites/web/fusepilatesbe/subsites/staging.fusepilates.be
-STAGING_URL := https://staging.fusepilates.be
+STAGING_HOST := #
+STAGING_PATH := #
+STAGING_URL := #
 PRODUCTION_HOST := # Configure when ready
 PRODUCTION_PATH := # Configure when ready
 PRODUCTION_URL := # Configure when ready
@@ -402,4 +402,5 @@ _backup-production:
 # === ALIASES ===
 s: save
 d: deploy
+
 p: sync-to-local

@@ -12,22 +12,28 @@ await (await import('dotenv')).default.config({
 
 export default defineConfig(({ command }) => ({
     root: process.cwd(), // ✅ WSL-friendly root
-    base: command === 'serve' ? '' :  process.env.VITE_THEME ? `/content/themes/${process.env.VITE_THEME}/assets/dist/` : '/dist/',
+    base: command === 'serve' ? '' :  process.env.VITE_THEME ? `/app/themes/${process.env.VITE_THEME}/assets/dist/` : '/dist/',
     publicDir: false,
+    define: {
+        VERSION: JSON.stringify('3.24.2'),
+        LOG: 'false',
+    },
     build: {
         assetsDir: '',
         emptyOutDir: true,
         manifest: true,
-        outDir: `./app/content/themes/${process.env.VITE_THEME}/assets/dist/`,
+        outDir: `./web/app/themes/${process.env.VITE_THEME}/assets/dist/`,
         rollupOptions: {
             input: {
-                'main': path.resolve(process.cwd(), 'src/main.js'),
+                'uikit-custom': path.resolve(process.cwd(), 'src/uikit-custom.js'),
+                'theme-services': path.resolve(process.cwd(), 'src/theme-services.js'),
+                'ntdst-custom': path.resolve(process.cwd(), 'src/ntdst-custom.js'),
             },
             output: {
                 format: 'es',
-                entryFileNames: '[name]-[hash].js',
-                chunkFileNames: '[name]-[hash].js',
-                assetFileNames: '[name]-[hash][extname]'
+                entryFileNames: '[name].js',
+                chunkFileNames: 'chunks/[name]-[hash].js',
+                assetFileNames: 'assets/[name]-[hash][extname]'
             },
         },
     },

@@ -45,7 +45,7 @@ VITE_PATH := $(THEMES_LOCAL)/$(VITE_THEME)
 # ═══════════════════════════════════════════════════════════════════════════
 
 LOCAL_URL := https://$(PROJECT_NAME).ddev.site
-ENV_FILE := .env
+ENV_FILE := $(APP_DIR)/.env
 ENV_EXAMPLE := .env.example
 
 # ═══════════════════════════════════════════════════════════════════════════

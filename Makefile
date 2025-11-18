@@ -105,7 +105,7 @@ setup: ## Local setup
 	@if [ ! -f $(ENV_FILE) ]; then cp $(ENV_EXAMPLE) $(ENV_FILE) && echo "$(YELLOW)Created $(ENV_FILE)$(RESET)"; fi
 	@if ! ddev describe >/dev/null 2>&1; then ddev config --docroot=$(APP_DIR) --project-type=php --project-name=$(PROJECT_NAME); fi
 	@ddev start
-	@ddev composer install 2>/dev/null || true
+	ddev composer install --working-dir=$(APP_DIR) 2>/dev/null || true
 	@$(MAKE) --no-print-directory _git-setup
 	@echo "$(GREEN)Setup complete$(RESET)"
 

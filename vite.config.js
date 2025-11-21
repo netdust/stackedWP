@@ -12,7 +12,7 @@ await (await import('dotenv')).default.config({
 
 export default defineConfig(({ command }) => ({
     root: process.cwd(), // ✅ WSL-friendly root
-    base: command === 'serve' ? '' :  process.env.VITE_THEME ? `/app/themes/${process.env.VITE_THEME}/assets/dist/` : '/dist/',
+    base: command === 'serve' ? '' :  process.env.VITE_THEME ? `/app/content/themes/${process.env.VITE_THEME}/assets/dist/` : '/dist/',
     publicDir: false,
     define: {
         VERSION: JSON.stringify('3.24.2'),
@@ -22,7 +22,7 @@ export default defineConfig(({ command }) => ({
         assetsDir: '',
         emptyOutDir: true,
         manifest: true,
-        outDir: `./web/app/themes/${process.env.VITE_THEME}/assets/dist/`,
+        outDir: `./app/content/themes/${process.env.VITE_THEME}/assets/dist/`,
         rollupOptions: {
             input: {
                 'uikit-custom': path.resolve(process.cwd(), 'src/uikit-custom.js'),

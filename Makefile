@@ -8,7 +8,7 @@
 #                          PROJECT CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════
 
-PROJECT_NAME := fuse
+PROJECT_NAME := yves
 STAGING_HOST := #
 STAGING_PATH := #
 STAGING_URL := #
@@ -54,8 +54,9 @@ ENV_EXAMPLE := .env.example
 
 BACKUP_DIR := backups
 TEMP_DIR := /tmp
+TEMPLATE_DIR := $(HOME)/.wordpress-templates
 GITHUB_USER := netdust
-TEMPLATE_PREFIX := wp fairness-template-
+TEMPLATE_PREFIX := template-
 
 # ═══════════════════════════════════════════════════════════════════════════
 #                          INTERNAL
@@ -103,7 +104,7 @@ setup: ## Local setup
 	@echo "$(BLUE)Setting up...$(RESET)"
 	@$(MAKE) --no-print-directory _check-requirements
 	@if [ ! -f $(ENV_FILE) ]; then cp $(ENV_EXAMPLE) $(ENV_FILE) && echo "$(YELLOW)Created $(ENV_FILE)$(RESET)"; fi
-	@if ! ddev describe >/dev/null 2>&1; then ddev config --docroot=$(APP_DIR) --project-type=php --project-name=$(PROJECT_NAME); fi
+	@if ! ddev describe >/dev/null 2>&1; then ddev config --docroot=$(APP_DIR) --project-type=wordpress --project-name=$(PROJECT_NAME); fi
 	@ddev start
 	ddev composer install --working-dir=$(APP_DIR) 2>/dev/null || true
 	@npm install 2>/dev/null || true
@@ -230,52 +231,58 @@ template-save: ## Export site as template
 	@if ! echo "$(name)" | grep -qE '^[a-zA-Z][a-zA-Z0-9._-]*$$'; then echo "$(RED)Invalid name$(RESET)"; exit 1; fi
 	@echo "$(BLUE)Saving template: $(name)$(RESET)"
 	@$(MAKE) --no-print-directory _check-ddev
-	@TEMPLATE_DIR="$(TEMP_DIR)/$(TEMPLATE_PREFIX)$(name)"; \
-	rm -rf "$$TEMPLATE_DIR"; mkdir -p "$$TEMPLATE_DIR"; \
-	ddev export-db --file="$$TEMPLATE_DIR/database.sql.gz" && gunzip "$$TEMPLATE_DIR/database.sql.gz"; \
-	sed -i.bak "s|$(LOCAL_URL)|__SITE_URL__|g" "$$TEMPLATE_DIR/database.sql" && rm -f "$$TEMPLATE_DIR/database.sql.bak"; \
-	[ -d "$(UPLOADS_LOCAL)" ] && cp -R $(UPLOADS_LOCAL) "$$TEMPLATE_DIR/"; \
-	echo "# Template: $(name)\nCreated: $$(date)\nSource: $(PROJECT_NAME)" > "$$TEMPLATE_DIR/README.md"; \
-	cd "$$TEMPLATE_DIR" && git init -b main && git add . && git commit -m "Template: $(name)"; \
+	@SAVE_DIR="$(TEMPLATE_DIR)/$(TEMPLATE_PREFIX)$(name)"; \
+	mkdir -p "$(TEMPLATE_DIR)"; rm -rf "$$SAVE_DIR"; mkdir -p "$$SAVE_DIR"; \
+	ddev export-db --file="$$SAVE_DIR/database.sql.gz" && gunzip "$$SAVE_DIR/database.sql.gz"; \
+	sed -i.bak "s|$(LOCAL_URL)|__SITE_URL__|g" "$$SAVE_DIR/database.sql" && rm -f "$$SAVE_DIR/database.sql.bak"; \
+	[ -d "$(CONTENT_LOCAL)" ] && cp -R $(CONTENT_LOCAL) "$$SAVE_DIR/content"; \
+	[ -d "src" ] && cp -R src "$$SAVE_DIR/src"; \
+	echo "# Template: $(name)\nCreated: $$(date)\nSource: $(PROJECT_NAME)" > "$$SAVE_DIR/README.md"; \
+	cd "$$SAVE_DIR" && git init -b main && git add . && git commit -m "Template: $(name)"; \
 	if git ls-remote "git@github.com:$(GITHUB_USER)/$(TEMPLATE_PREFIX)$(name).git" >/dev/null 2>&1; then \
 	   git remote add origin "git@github.com:$(GITHUB_USER)/$(TEMPLATE_PREFIX)$(name).git"; \
 	   git push -u origin main && echo "$(GREEN)Pushed to GitHub$(RESET)"; \
 	else \
-	   echo "$(GREEN)Saved locally: $$TEMPLATE_DIR$(RESET)"; \
-	   echo "To push: cd $$TEMPLATE_DIR && git remote add origin ... && git push"; \
+	   echo "$(GREEN)Saved locally: $$SAVE_DIR$(RESET)"; \
+	   echo "To push: cd $$SAVE_DIR && git remote add origin ... && git push"; \
 	fi
 
 template-load: ## Import template
 	@if [ -z "$(name)" ]; then echo "$(RED)Usage: make template-load name=my-template$(RESET)"; exit 1; fi
 	@echo "$(BLUE)Loading template: $(name)$(RESET)"
 	@$(MAKE) --no-print-directory _check-ddev
-	@echo "$(RED)This will OVERWRITE DB & uploads$(RESET)"
+	@echo "$(RED)This will OVERWRITE DB, content & src folders$(RESET)"
 	@read -p "Continue? [y/N]: " c && [ "$$c" = "y" ] || exit 1
-	@TEMPLATE_DIR="$(TEMP_DIR)/$(TEMPLATE_PREFIX)$(name)"; \
-	if [ -d "$$TEMPLATE_DIR" ] && [ -f "$$TEMPLATE_DIR/README.md" ]; then \
+	@LOAD_DIR="$(TEMPLATE_DIR)/$(TEMPLATE_PREFIX)$(name)"; \
+	if [ -d "$$LOAD_DIR" ] && [ -f "$$LOAD_DIR/README.md" ]; then \
 	   echo "Using local template"; \
-	elif git clone "git@github.com:$(GITHUB_USER)/$(TEMPLATE_PREFIX)$(name).git" "$$TEMPLATE_DIR" 2>/dev/null; then \
+	elif git clone "git@github.com:$(GITHUB_USER)/$(TEMPLATE_PREFIX)$(name).git" "$$LOAD_DIR" 2>/dev/null; then \
 	   echo "Cloned from GitHub"; \
 	else \
 	   echo "$(RED)Template not found$(RESET)"; $(MAKE) template-list; exit 1; \
 	fi; \
 	mkdir -p $(BACKUP_DIR); \
-	[ -f "$$TEMPLATE_DIR/database.sql" ] && ddev export-db --file="$(BACKUP_DIR)/before-$$(date +%s).sql.gz" && \
-	   ddev import-db --src="$$TEMPLATE_DIR/database.sql" && \
+	[ -f "$$LOAD_DIR/database.sql" ] && ddev export-db --file="$(BACKUP_DIR)/before-$$(date +%s).sql.gz" && \
+	   ddev import-db --src="$$LOAD_DIR/database.sql" && \
 	   ddev wp search-replace '__SITE_URL__' "$(LOCAL_URL)" --all-tables; \
-	[ -d "$$TEMPLATE_DIR/uploads" ] && mkdir -p $(UPLOADS_LOCAL) && rsync -av "$$TEMPLATE_DIR/uploads/" $(UPLOADS_LOCAL)/; \
-	ddev wp cache flush; rm -rf "$$TEMPLATE_DIR"; \
+	[ -d "$$LOAD_DIR/content" ] && mkdir -p $(CONTENT_LOCAL) && rsync -av --delete "$$LOAD_DIR/content/" $(CONTENT_LOCAL)/; \
+	[ -d "$$LOAD_DIR/src" ] && mkdir -p src && rsync -av --delete "$$LOAD_DIR/src/" src/; \
+	ddev wp cache flush; \
 	echo "$(GREEN)Template '$(name)' loaded$(RESET)"
 
 template-list: ## List templates
 	@echo "$(BLUE)Templates$(RESET)"
 	@echo "$(YELLOW)Local:$(RESET)"
-	@for t in $(TEMP_DIR)/$(TEMPLATE_PREFIX)*; do \
-	   [ -d "$$t" ] && [ -f "$$t/README.md" ] && \
-	   name=$$(basename "$$t" | sed 's/^$(TEMPLATE_PREFIX)//') && \
-	   created=$$(grep "Created:" "$$t/README.md" 2>/dev/null | cut -d: -f2- | xargs) && \
-	   printf "  • %-20s %s\n" "$$name" "($$created)"; \
-	done 2>/dev/null || echo "  (none)"
+	@if [ -d "$(TEMPLATE_DIR)" ]; then \
+	   for t in $(TEMPLATE_DIR)/$(TEMPLATE_PREFIX)*; do \
+	      [ -d "$$t" ] && [ -f "$$t/README.md" ] && \
+	      name=$$(basename "$$t" | sed 's/^$(TEMPLATE_PREFIX)//') && \
+	      created=$$(grep "Created:" "$$t/README.md" 2>/dev/null | cut -d: -f2- | xargs) && \
+	      printf "  • %-20s %s\n" "$$name" "($$created)"; \
+	   done 2>/dev/null || echo "  (none)"; \
+	else \
+	   echo "  (none)"; \
+	fi
 	@echo "$(YELLOW)GitHub:$(RESET)"
 	@gh repo list $(GITHUB_USER) --limit 100 2>/dev/null | grep "$(TEMPLATE_PREFIX)" | while read l; do \
 	   name=$$(echo "$$l" | awk '{print $$1}' | cut -d/ -f2 | sed 's/^$(TEMPLATE_PREFIX)//'); \
